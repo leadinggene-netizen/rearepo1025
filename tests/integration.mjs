@@ -19,7 +19,7 @@ test('HTTP, SignalR, durable command lifecycle and restart recovery (no broker)'
   let server, output = '';
   async function start() {
     output = '';
-    server = spawn(dotnet, [dll], {env:{...process.env,BRIDGE_DATA:directory,ASPNETCORE_URLS:base,DOTNET_PROCESSOR_COUNT:'1'},stdio:['ignore','pipe','pipe']});
+    server = spawn(dotnet, [dll], {env:{...process.env,BRIDGE_DATA:directory,ASPNETCORE_URLS:base,DOTNET_PROCESSOR_COUNT:'1',ASPNETCORE_ENVIRONMENT:'Production'},stdio:['ignore','pipe','pipe']});
     server.stdout.on('data', b => output += b); server.stderr.on('data', b => output += b);
     server.on('error', e => { output += e.message; });
     for(let i=0;i<150;i++) {
@@ -34,6 +34,7 @@ test('HTTP, SignalR, durable command lifecycle and restart recovery (no broker)'
   const statePath = path.join(directory,'state.json');
   const secrets = JSON.parse(await readFile(statePath,'utf8'));
   const admin = secrets.adminKey, terminal = secrets.connection.terminalKey, webhook = secrets.connection.webhookKey;
+  assert.ok(!output.includes(admin), 'production startup must not print the admin credential into service logs');
   function request(route,key,body) { return fetch(base+route,{method:body===undefined?'GET':'POST',headers:{'X-Bridge-Key':key,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)}); }
   const poll = '/api/terminal/poll?mode=demo&account=12345&broker=Test-Demo&balance=10000&equity=9999&positions=0';
   const alert = {id:'first-alert',action:'buy',symbol:'EURUSD',lots:0.01,slPoints:200,tpPoints:400};

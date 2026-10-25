@@ -5,6 +5,7 @@ Set-Location -LiteralPath $projectDirectory
 $localDotnet = Join-Path $projectDirectory '.tools/dotnet/dotnet.exe'
 $dotnetCommand = if (Test-Path -LiteralPath $localDotnet) { $localDotnet } else { 'dotnet' }
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+$env:ASPNETCORE_ENVIRONMENT = 'Development'
 $env:DOTNET_CLI_HOME = Join-Path $projectDirectory '.tools/home'
 $env:APPDATA = Join-Path $projectDirectory '.tools/appdata'
 New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null

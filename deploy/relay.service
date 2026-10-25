@@ -1,0 +1,38 @@
+[Unit]
+Description=Relay demo-account trading bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=relay
+Group=relay
+WorkingDirectory=/opt/relay/current
+ExecStart=/usr/bin/dotnet /opt/relay/current/BridgeDemo.dll
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5080
+Environment=BRIDGE_DATA=/var/lib/relay
+Environment=AllowedHosts=relay.tradingviewtometatraders.com;127.0.0.1;localhost
+Environment=Logging__LogLevel__Default=Warning
+Environment=Logging__LogLevel__Microsoft=Warning
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+StateDirectory=relay
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+MemoryMax=768M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

@@ -39,3 +39,5 @@ All paths below are relative to your repository checkout root (the local working
 | `scripts/export-file-guide.py` | Regenerates the consolidated source listing using Python standard library |
 
 Generated and ignored: `.tools/` SDK/compiler; `data/state.json` keys and journal; `data/server.lock` process lease; `bin/` and `obj/` server build; `mt5/RelayDemo.ex5` and `.log` MetaEditor output; `artifacts/` test state, screenshots and published output. The EA's pending-result file is separately stored in the selected MT5 terminal's `MQL5/Files` sandbox.
+
+HTTPS deployment files: `deploy/relay.service` defines the unprivileged service; `deploy/relay.nginx.conf` contains HTTPS and proxy controls; `deploy/install-release.sh` installs a checksum-verified release while retaining state; `scripts/package-release.ps1` builds the deployable archive; `mt5/RelayDemoRemote.mq5` adds the exact deployed HTTPS origin; `docs/VPS.md` contains operating instructions and server paths. The active MT5 installation is not edited by these files.

@@ -13,11 +13,15 @@ Open **http://127.0.0.1:5080**. Paste the admin key printed in the terminal. Kee
 
 The portal opens before MT5 is connected. It displays **Offline** and disables sending until the adapter heartbeats. This is an honest empty state, not a simulated account.
 
+## Use the deployed HTTPS portal
+
+Open **https://relay.tradingviewtometatraders.com**. The server runs on the Ubuntu VPS; MT5 remains on Windows. It uses fresh credentials. See [docs/VPS.md](docs/VPS.md) for retrieving the admin key, switching to `mt5/RelayDemoRemote.mq5`, server paths, updates and rollback. Keep only one Relay EA attached when migrating from localhost.
+
 ## Connect your MT5 demo account
 
 1. Sign in to your intended **demo** account in your broker's Windows MT5 terminal. Note the account login number. Do not enter the broker password in this project.
 2. In MT5 select **File → Open Data Folder → MQL5 → Experts**. Copy `mt5/RelayDemo.mq5` there. You can also use the locally compiled `mt5/RelayDemo.ex5` produced during verification; generated binaries are intentionally not committed.
-3. Open the source in MetaEditor and press **F7** to compile. Refresh MT5 Navigator. The EA compiled here with zero errors and warnings; broker execution has not been tested.
+3. Open the source in MetaEditor and press **F7** to compile. Refresh MT5 Navigator. EA compilation passed with zero errors and warnings. You previously verified localhost demo-account execution; the new HTTPS adapter still needs its separate acceptance test.
 4. Under **Tools → Options → Expert Advisors**, enable WebRequest for `http://127.0.0.1:5080`. Enable Algo Trading on the toolbar and the EA's algorithmic-trading permission. DLL imports are not needed.
 5. Attach **one** copy of RelayDemo to one chart. Set `ExpectedLogin` to the exact demo login, and `TerminalKey` to the key shown in the authenticated portal. Keep the default URL. Choose a unique nonzero `MagicNumber` and your own `MaxLots` cap (default 0.10).
 6. Confirm the portal shows **Connected**, the correct account and broker. The first heartbeat binds this connection to that account/broker pair. Switching accounts is intentionally not a portal shortcut in this demo.
@@ -52,7 +56,7 @@ POST to `http://127.0.0.1:5080/api/webhook/demo-mt5`. This example is executable
 
 `id` is the producer's idempotency key: resend the same ID and identical trade fields for a transport retry. Never generate a new ID merely because a result is delayed. Distinct intended actions need distinct IDs. Valid IDs contain letters, digits, underscore, hyphen, dot, colon, up to 128 characters. Do not use one ID for both entry and exit.
 
-**TradingView cloud cannot reach localhost.** This build intentionally accepts loopback requests only, even if you change its listening URL. Its JSON contract is suitable for TradingView, but production ingress requires the deployment work in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Do not point a public tunnel at this local preview and expect a production service.
+**TradingView cloud cannot reach localhost.** The deployed webhook is `https://relay.tradingviewtometatraders.com/api/webhook/demo-mt5`; use its fresh webhook key and connect the remote demo EA first. The backend retains its loopback boundary behind Nginx. The local preview remains local. Read [docs/VPS.md](docs/VPS.md) before switching endpoints.
 
 ## What happens to an instruction
 
@@ -95,4 +99,4 @@ Keep `.tools`, `data`, `artifacts`, `bin`, `obj`, EA logs/binaries and all secre
 
 Implemented: one local connection, authenticated alert ingress, live SignalR portal, persistent command journal, terminal heartbeats and equity/balance, real demo-only MQL5 execution adapter, finite result recovery, CI and container packaging.
 
-Not implemented: MT4, multi-user login/tenancy, multiple connections, remote HTTPS ingress, cloud hosting, scheduled closures, symbol mapping UI, subscription billing, email/Telegram notifications, trade-history analytics or automatic EA updates. These are separate features, not hidden behind demo controls. The project is a working foundation rather than a replacement for every module in the reference screenshots.
+Not implemented: MT4, multi-user login/tenancy, multiple connections, scheduled closures, symbol mapping UI, subscription billing, email/Telegram notifications, trade-history analytics or automatic EA updates. These are separate features, not hidden behind demo controls. The project is a working foundation rather than a replacement for every module in the reference screenshots.

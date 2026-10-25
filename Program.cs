@@ -27,12 +27,14 @@ void Sweep(BridgeState s)
 
 app.Use(async (context, next) =>
 {
-    // This preview is deliberately a loopback service, even if a URL is accidentally changed.
+    // Public deployments must enter through the local HTTPS reverse proxy.
     var ip = context.Connection.RemoteIpAddress;
     if (ip is null || !IPAddress.IsLoopback(ip)) { context.Response.StatusCode = 403; return; }
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["Referrer-Policy"] = "no-referrer";
     var path = context.Request.Path;
+    if (path.StartsWithSegments("/api") || path.StartsWithSegments("/hub"))
+        context.Response.Headers.CacheControl = "no-store";
     string? expected = path.StartsWithSegments("/api/admin") || path.StartsWithSegments("/hub/portal")
         ? store.Read(s => s.AdminKey)
         : path.StartsWithSegments("/api/terminal") ? store.Read(s => s.Connection.TerminalKey) : null;
@@ -164,8 +166,12 @@ app.MapPost("/api/admin/resolve/{id}", async (string id) =>
     return result;
 });
 Console.WriteLine("\nBRIDGE DEMO — MT5 demo accounts only");
-Console.WriteLine("Portal: http://127.0.0.1:5080");
-Console.WriteLine("Admin key (paste into portal): " + store.Read(s => s.AdminKey));
+if (app.Environment.IsDevelopment())
+{
+    Console.WriteLine("Portal: http://127.0.0.1:5080");
+    Console.WriteLine("Admin key (paste into portal): " + store.Read(s => s.AdminKey));
+}
+else Console.WriteLine("Credentials are stored in BRIDGE_DATA/state.json; retrieve through an authorized server session.");
 app.Run();
 
 public sealed class PortalHub : Hub { }

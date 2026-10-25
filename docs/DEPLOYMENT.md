@@ -1,5 +1,7 @@
 # GitHub, CI/CD and deployment
 
+The single-operator HTTPS demo is deployed on Ubuntu using Nginx and systemd. Read [VPS.md](VPS.md) for the actual server layout, credential retrieval, remote EA setup, release installation and rollback. The broader production roadmap below is not a prerequisite checklist already completed by this demo.
+
 ## Repository
 
 The local Git repository is in `bridge-demo`, with origin `https://github.com/leadinggene-netizen/rearepo1025.git` and branch `feature/bridge-demo`. The supplied remote was empty when inspected. Vendor reverse-engineering case files sit outside this repository and must stay there.
@@ -32,18 +34,18 @@ The Dockerfile builds a .NET 10 image. The manual container workflow publishes a
 
 The application enforces loopback clients. The container is therefore a local packaging starting point, not a public web service. On Linux, a host-network run can preserve the loopback boundary; provision a writable `/data` directory for the image's unprivileged UID and retain it across restarts. On Windows, use the native preview script. Port publishing alone does not remove the application-level loopback check.
 
-## Before a public TradingView integration
+## Beyond the single-operator HTTPS demo
 
-This is future work, not configuration already supplied by the demo:
+HTTPS ingress, a restricted reverse proxy, per-IP request limits, persistent service startup, certificate renewal and an explicit remote EA are now supplied for one operator and one demo account. The following remain requirements for a broader production offering:
 
 1. Separate public webhook ingress from operator/terminal interfaces; deploy HTTPS with deliberate network and proxy trust rules. Keep the admin portal private.
 2. Replace the single local connection with tenant/account authorization, scoped credential issuance/rotation and audited access. Encrypt stored secrets with a managed key service.
 3. Use a transactional database and durable command/result records. Add reconciliation against broker trade identifiers; do not promise exactly-once trading on the basis of message delivery.
 4. Add bounded authenticated ingress, request-rate controls, operator auditing, backup/restore and retention tests. Ensure logs redact tokens and webhook secrets.
-5. Add a remote terminal transport (HTTPS polling or a SignalR companion) with explicit endpoint configuration, account binding and connection ownership. The current EA is intentionally limited to the local URL.
+5. Extend the existing HTTPS polling adapter for any additional endpoint/account requirements. `RelayDemoRemote.mq5` supports the exact deployed origin; the original `RelayDemo.mq5` remains local-only. Retain explicit account binding and connection ownership.
 6. Publish immutable releases, test migrations and rollback, and require a reviewed demo-account acceptance test before broker-capable changes are released.
 
-Only after that work should the TradingView alert use a public webhook URL. The JSON field `secret` is supported because TradingView cannot normally add an arbitrary authentication header. Use a stable unique event ID; scope it by strategy and event type to avoid collisions. Do not turn every simulated `sell` fill into a short entry when the strategy intended to close a long.
+The deployed demo webhook can accept TradingView alerts after the intended demo terminal is connected. The JSON field `secret` is supported because TradingView cannot normally add an arbitrary authentication header. Use a stable unique event ID; scope it by strategy and event type to avoid collisions. A multi-user or live-account offering needs additional design and validation.
 
 ## State and secrets
 
