@@ -1,0 +1,33 @@
+name: Build and verify
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: dotnet restore --configfile NuGet.Config
+      - run: dotnet build --no-restore --configuration Release --warnaserror
+      - run: node --check wwwroot/app.js
+      - run: node --test tests/integration.mjs
+        env:
+          BRIDGE_DLL: bin/Release/net10.0/BridgeDemo.dll
+      - run: dotnet publish --no-restore --configuration Release --output artifacts/publish
+      - run: node scripts/check-publish.mjs artifacts/publish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-preview
+          path: |
+            artifacts/publish/
+            mt5/RelayDemo.mq5
+            README.md
+            docs/

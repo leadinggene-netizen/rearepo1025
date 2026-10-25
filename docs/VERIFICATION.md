@@ -1,0 +1,24 @@
+# Verification record
+
+Verified locally on 25 October 2026, Windows, .NET SDK 10.0.402 and Node 22.23.1.
+
+## Completed checks
+
+- ASP.NET Core build: zero warnings/errors; warnings-as-errors build also passes.
+- Browser JavaScript syntax: `node --check wwwroot/app.js`.
+- HTTP/SignalR integration suite: passes against a real isolated ASP.NET server and WebSocket connection, using a fake terminal protocol client. Checks separate credential roles, invalid inputs, offline rejection, demo metadata, account binding, official-client bearer negotiation, JSON-secret authentication, idempotent IDs/results, conflicting IDs, concurrent polling, single dispatch, SignalR change events, startup recovery, explicit unknown acknowledgement and queued expiry.
+- MT5 EA: compiled using a local portable copy of the already installed MetaEditor and its standard-library includes. `RelayDemo.log` reports **0 errors, 0 warnings**. The executable is in `mt5/RelayDemo.ex5`, ignored by Git.
+- Browser: local login and actual **Live portal** status verified; the disconnected MT5 state shows Offline and the Send button is disabled. Responsive narrow/mobile rendering inspected visually. Desktop CSS reviewed; a wide browser viewport was not available in the embedded panel.
+- Package review: explicit project exclusions prevent `.tools`, `data`, `artifacts` and generated EA output from entering published server content. Git and Docker ignores independently exclude the same sensitive/local directories.
+
+## Review
+
+Code review: skipped (ce-code-review unavailable). The definition loaded, but its required intent/persona/routing reference files were missing when the review reached those stages. The simplification skill's required persona files were also missing. No independent or multi-agent review is claimed.
+
+A manual scan covered authentication separation, browser text rendering, persisted-before-delivery ordering, result ambiguity, terminal account checks, request limits, idempotency, concurrent claims, local state locking, API/UI parity, and publication boundaries. Fixes made during that scan: official SignalR bearer-header support; JSON-secret ingress for TradingView-style producers; exclusive state-directory lease; clearing acknowledged terminal journals; timeout-state sweeping; netting-close isolation; and explicit publish exclusions for secrets/generated data. The tests exercise the corresponding server behavior.
+
+## Not established
+
+No EA was attached to a chart, no account was accessed and no broker order was submitted. Compilation and protocol tests do not establish broker acceptance, actual fills, partial fills, permitted stops or a working end-to-end account connection. Complete the README's deliberate demo-account acceptance test yourself.
+
+GitHub CI can run only after source publication and a workflow run; local test success is not a claim that GitHub Actions has already passed. Container packaging is supplied; no production deployment or Docker runtime acceptance test has been performed.

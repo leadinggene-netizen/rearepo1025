@@ -1,0 +1,8 @@
+.git
+.tools
+data
+artifacts
+bin
+obj
+mt5/*.ex5
+mt5/*.log

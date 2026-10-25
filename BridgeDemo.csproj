@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DefaultItemExcludes>$(DefaultItemExcludes);.tools/**;data/**;artifacts/**</DefaultItemExcludes>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Remove=".tools/**;data/**;artifacts/**;mt5/*.ex5;mt5/*.log" />
+    <None Remove=".tools/**;data/**;artifacts/**;mt5/*.ex5;mt5/*.log" />
+  </ItemGroup>
+</Project>
