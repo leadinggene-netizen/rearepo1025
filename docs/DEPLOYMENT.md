@@ -18,7 +18,7 @@ If publishing manually after reviewing, create a commit of the authored source a
 
 ## CI
 
-`.github/workflows/ci.yml` runs on pushes and pull requests. It installs .NET 10 and Node 22, restores the package-free server, builds with warnings as errors, checks browser JavaScript, runs real loopback HTTP/SignalR tests, and uploads the published server, EA source and docs as a workflow artifact.
+`.github/workflows/ci.yml` runs on pushes and pull requests. It installs .NET 10 and Node 22, restores version-locked dependencies, builds with warnings as errors, checks browser JavaScript, runs real loopback HTTP/SignalR tests, and uploads the published server, EA source and docs as a workflow artifact.
 
 MT5 compilation is not claimed by the Linux CI job. Add a trusted, licensed Windows runner with MetaEditor if automated EA compilation is needed. Do not put a broker password or live-account terminal on that runner. Compile the source without attaching it to a chart. The documented MetaEditor command is:
 

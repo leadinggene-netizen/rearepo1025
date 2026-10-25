@@ -2,7 +2,7 @@
 
 Portal: https://relay.tradingviewtometatraders.com
 
-The Ubuntu 24.04 VPS at `23.94.68.231` runs one Relay process and one connection for a demo trading account. MT5 stays on your Windows computer. The HTTPS deployment has fresh credentials and an empty journal; it does not inherit the local preview's keys, account binding or history.
+The Ubuntu 24.04 VPS at `23.94.68.231` runs one Relay process and one connection for a demo trading account. MT5 stays on your Windows computer. The HTTPS deployment has its own credentials and history, independent of the local preview. The SQLite update preserves the existing VPS credentials, account binding and completed trades.
 
 ## Open the portal
 

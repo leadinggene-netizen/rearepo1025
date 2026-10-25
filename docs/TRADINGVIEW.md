@@ -31,19 +31,19 @@ TradingView requires webhook responses within three seconds. Relay acknowledges 
 ## Receipt and execution rules
 
 - Each authenticated attempt is recorded with receipt ID, time, event ID, disposition and a normalized payload. The `secret` field, authentication headers and arbitrary extra fields are excluded. Authenticated malformed JSON is recorded when a valid header key identifies it; an unauthenticated body cannot establish receipt identity.
-- A valid, policy-compliant new event commits its receipt and command together and returns202. It can queue while paused, offline or behind an unresolved command.202 means stored, not traded.
-- A matching accepted ID returns200 and a duplicate receipt. Different fields for that ID return409. The database retains ID uniqueness beyond the dashboard's recent200 commands; restarting does not reset it.
-- Invalid input returns400; wrong connection404; symbol/lot policy rejection422; full pending queue409. These authenticated receipts remain recorded without executable commands. Storage failure/busy returns503, with no successful acknowledgement. Do not assume every non-2xx response causes TradingView to retry.
+- A valid, policy-compliant new event commits its receipt and command together and returns 202. It can queue while paused, offline or behind an unresolved command.202 means stored, not traded.
+- A matching accepted ID returns 200 and a duplicate receipt. Different fields for that ID return409. The database retains ID uniqueness beyond the dashboard's recent200 commands; restarting does not reset it.
+- Invalid input returns 400; wrong connection 404; symbol/lot policy rejection 422; full pending queue 409. These authenticated receipts remain recorded without executable commands. Storage failure/busy returns 503, with no successful acknowledgement. Do not assume every non-2xx response causes TradingView to retry.
 - FIFO dispatch allows one command at a time. The EA polls approximately once per second. An unknown outcome blocks subsequent dispatch until a terminal result or deliberate operator reconciliation resolves it.
 - Queued commands expire at a fixed deadline: receipt time plus the saved lifetime, capped by `sentAt` plus that lifetime when supplied. Future timestamps over five seconds are rejected. Offline periods, restarts, retries and pausing do not extend the deadline. Changing lifetime applies to new commands; symbol and lot restrictions are rechecked at dispatch.
-- The pending queue is bounded at1000 commands. Completed history remains in SQLite; the dashboard shows200 commands and100 receipts/events. Disk capacity and backup retention require ordinary maintenance.
+- The pending queue is bounded at 1000 commands. Completed history remains in SQLite; the dashboard shows200 commands and 100 receipts/events. Disk capacity and backup retention require ordinary maintenance.
 - Pausing stops new dispatch. It does not cancel already-dispatched work, close broker positions or prevent alerts being recorded. Alerts outside the policy are recorded as rejected and are not held for automatic execution after a policy change.
 
 The portal provides persisted activity/warnings, offline/paused/unknown state and queue depth. Email, SMS and Telegram notifications are not configured. Rejected/expired events remain visible for investigation; automated redelivery of uncertain trades is deliberately absent.
 
 ## Database and operations
 
-`BRIDGE_DATA/bridge.db` is SQLite schema version1, with `settings`, `commands`, `receipts` and `audit` tables. The Microsoft provider and native SQLite dependencies are version-locked in `packages.lock.json`. WAL mode, FULL synchronization and parameterized statements are used. One exclusive server lease owns the data directory. Heartbeat telemetry remains transient and does not rewrite the journal; only recent/pending commands are cached in memory.
+`BRIDGE_DATA/bridge.db` is SQLite schema version 1, with `settings`, `commands`, `receipts` and `audit` tables. The Microsoft provider and native SQLite dependencies are version-locked in `packages.lock.json`. WAL mode, FULL synchronization and parameterized statements are used. One exclusive server lease owns the data directory. Heartbeat telemetry remains transient and does not rewrite the journal; only recent/pending commands are cached in memory.
 
 Legacy `state.json` is imported once with the same credentials, account binding and history. Legacy queued commands expire on migration; dispatched commands become unknown. Existing JSON is retained as a pre-migration artifact and is no longer the active state source. The database update starts paused and with an empty symbol allowlist. Missing database settings do not silently reset credentials.
 

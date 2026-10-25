@@ -1,5 +1,20 @@
 # VPS deployment verification — 2026-10-25
 
+## Current SQLite release
+
+Active release: `20261025-sqlite-01`, built from commit `cafd0ffc3d9e8aad5887b07605b27064c6a2864c`. Archive SHA-256: `1dc0eb0b0b62f063dca7f26e17a8f92cac4b9ab23b517b4d5265e36bc4a3bd36`.
+
+- GitHub Linux CI passed: [Build and verify](https://github.com/leadinggene-netizen/rearepo1025/actions/runs/40245662537). The isolated Windows suite passed 11 reported tests with no broker connection. 205 sequential durable ingress requests measured p95 approximately 21 ms and maximum 28 ms; this is a local synthetic workload, not a production capacity guarantee.
+- The installer stopped the service briefly, retained `/var/backups/relay/pre-20261025-sqlite-01/state`, and passed migration/integrity checks on a separate copy before migrating active state.
+- Active database integrity check returned `ok`. The two existing completed commands and credential/account binding preservation fingerprints match before/after. No queued, dispatched or unknown commands were present during migration.
+- The existing remote EA reconnected and the HTTPS dashboard reported Online. Execution remains PAUSED with an empty symbol allowlist for deliberate operator configuration. No EA reload was required and no order was submitted by deployment checks.
+- HTTPS health, authenticated dashboard/receipt reads, credential-role rejection, unexpected-origin rejection, body-size rejection and authenticated SignalR WebSocket handshake passed after migration.
+- `relay-backup.timer` is enabled. Both the authenticated backup API and scheduled backup service passed. Database file mode is 0600, owner relay; backup directory is 0700.
+- A 40960-byte database backup was transferred into memory, checksum-checked, encrypted to a 41572-byte AES-GCM CMS file on the Windows computer, and fully decrypted/authenticated back to identical bytes. It is under `.tools/vps-backups/relay-database/` with a verification manifest, using the existing separately protected recovery key. No plaintext database copy was saved locally and nothing was uploaded to Google Drive. This database verification does not verify the older full-disk image.
+- SSH, Nginx and NoMachine remain active. x-ui remains disabled. TradingView-originated end-to-end execution is an operator acceptance step; [TRADINGVIEW.md](TRADINGVIEW.md) describes an initial paused receipt test followed by a deliberate demo trade.
+
+## Earlier HTTPS deployment baseline
+
 Deployed endpoint: https://relay.tradingviewtometatraders.com
 
 Active release: `20261025-https-02`, under `/opt/relay/releases/20261025-https-02`. Release archive SHA-256: `5e291321816751d6cf416db66c5577c46578650daf4d0db57da56106d90599d3`. The package records source revision and a dirty working tree; deployment does not imply these changes have been committed or pushed to GitHub.
