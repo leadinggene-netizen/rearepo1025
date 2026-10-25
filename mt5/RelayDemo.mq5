@@ -22,10 +22,16 @@ bool AccountAllowed()
 
 string EscapeJson(string value)
 {
-   StringReplace(value, "\\", "\\\\"); StringReplace(value, "\"", "\\\"");
-   StringReplace(value, "\r", " "); StringReplace(value, "\n", " ");
-   StringReplace(value, "\t", " ");
-   return value;
+   string result = "";
+   for(int i = 0; i < StringLen(value); i++)
+   {
+      ushort c = StringGetCharacter(value, i);
+      if(c == 34) result += "\\\"";
+      else if(c == 92) result += "\\\\";
+      else if(c < 32) result += StringFormat("\\u%04x", (uint)c);
+      else result += StringSubstr(value, i, 1);
+   }
+   return result;
 }
 
 string UrlEncode(string value)

@@ -51,6 +51,10 @@ Keys have different roles. No broker password is requested or stored. Polling's 
 
 The durable journal is one JSON state file, replaced atomically from a flushed temporary file. Updates are serialized under a lock and performed on a copy; a failed write does not expose an in-memory command that was never persisted. A separate file lease excludes a second server process using the same directory.
 
+Command transitions and account/broker binding remain durable. Heartbeat time, balance, equity and position count are transient snapshots; they are cleared on restart and are not written on every poll. An unchanged dashboard uses the read path. If a queued or dispatched command is overdue, the dashboard first persists its expiry/unknown transition. Transactions clone records in memory and compare durable values, avoiding JSON clone/serialize work and disk writes when only telemetry changes. Saving still happens before a newly queued/dispatched command or execution result is exposed.
+
+Command IDs, broker symbols and account identifiers use absolute allowlist anchors (`\A` and `\z`), so a final LF cannot bypass validation. The EA JSON helper escapes control characters instead of replacing them with spaces; it preserves identifiers and result details.
+
 Only one unresolved command may exist for this connection. A repeated ID with matching trade fields returns its old record; a conflicting reuse returns 409. IDs remain in the journal (limit 10,000; no silent eviction). Commands are accepted only with a heartbeat from the last ten seconds. Queued commands expire after thirty seconds. Dispatched commands become unknown if overdue or if the server restarts. They are not replayed.
 
 The EA saves an unknown outcome before a broker request, then overwrites that record with the observed return code. It sends any outstanding result before collecting another command. A crash between dispatch and saving the result may lose an instruction or leave uncertainty. There is no atomic transaction joining the server disk, terminal disk and broker. An unknown state therefore requires human reconciliation, not a retry loop.

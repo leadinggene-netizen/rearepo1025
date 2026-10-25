@@ -7,7 +7,7 @@ public sealed class BridgeState
     public List<Signal> Signals { get; set; } = [];
 }
 
-public sealed class Connection
+public sealed record Connection
 {
     public string Id { get; set; } = "demo-mt5";
     public string WebhookKey { get; set; } = Guid.NewGuid().ToString("N");
@@ -20,7 +20,7 @@ public sealed class Connection
     public int Positions { get; set; }
 }
 
-public sealed class Signal
+public sealed record Signal
 {
     public string Id { get; set; } = "";
     public string Action { get; set; } = "";

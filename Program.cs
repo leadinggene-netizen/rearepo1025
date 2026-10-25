@@ -53,19 +53,26 @@ app.Use(async (context, next) =>
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-app.MapGet("/api/admin/state", () => store.Change(s =>
-{ Sweep(s); return Results.Json(new {
-    connection = s.Connection,
-    online = Online(s.Connection),
-    signals = s.Signals.AsEnumerable().Reverse().Take(200)
-}); }));
+app.MapGet("/api/admin/state", () =>
+{
+    var cutoff = DateTimeOffset.UtcNow.AddSeconds(-30);
+    if (store.Read(s => s.Signals.Any(x =>
+        (x.Status == "queued" && x.CreatedAt < cutoff) ||
+        (x.Status == "dispatched" && x.DispatchedAt < cutoff))))
+        store.Change(s => { Sweep(s); return true; });
+    return store.Read(s => Results.Json(new {
+        connection = s.Connection,
+        online = Online(s.Connection),
+        signals = s.Signals.AsEnumerable().Reverse().Take(200).ToArray()
+    }));
+});
 
 app.MapPost("/api/webhook/{connectionId}", async (string connectionId, AlertRequest request, HttpRequest http) =>
 {
     var webhookKey = http.Headers["X-Bridge-Key"].FirstOrDefault() ?? request.Secret;
     if (!Equal(webhookKey, store.Read(s => s.Connection.WebhookKey))) return Results.Unauthorized();
-    if (request.Id is null || !Regex.IsMatch(request.Id, "^[A-Za-z0-9_.:-]{1,128}$") ||
-        request.Symbol is null || !Regex.IsMatch(request.Symbol, "^[A-Za-z0-9_.-]{1,32}$") ||
+    if (request.Id is null || !Regex.IsMatch(request.Id, @"\A[A-Za-z0-9_.:-]{1,128}\z") ||
+        request.Symbol is null || !Regex.IsMatch(request.Symbol, @"\A[A-Za-z0-9_.-]{1,32}\z") ||
         request.Action is not ("buy" or "sell" or "close") ||
         !double.IsFinite(request.Lots) || request.Lots <= 0 || request.Lots > 1 ||
         !double.IsFinite(request.SlPoints) || !double.IsFinite(request.TpPoints) ||
@@ -98,7 +105,7 @@ app.MapGet("/api/terminal/poll", async (HttpRequest request) =>
 {
     var account = request.Query["account"].ToString();
     var broker = request.Query["broker"].ToString();
-    if (request.Query["mode"] != "demo" || !Regex.IsMatch(account, "^[0-9]{1,20}$") || broker.Length is < 1 or > 100)
+    if (request.Query["mode"] != "demo" || !Regex.IsMatch(account, @"\A[0-9]{1,20}\z") || broker.Length is < 1 or > 100)
         return Results.BadRequest("Demo account and broker required.");
     var result = store.Change<IResult>(s =>
     {

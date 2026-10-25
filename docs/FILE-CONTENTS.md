@@ -13,8 +13,8 @@ Paths are relative to the repository root. Generated data, local tools and third
     <DefaultItemExcludes>$(DefaultItemExcludes);.tools/**;data/**;artifacts/**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
-    <Content Remove=".tools/**;data/**;artifacts/**;mt5/*.ex5;mt5/*.log" />
-    <None Remove=".tools/**;data/**;artifacts/**;mt5/*.ex5;mt5/*.log" />
+    <Content Remove=".tools/**;data/**;artifacts/**;tests/**;mt5/*.ex5;mt5/*.log" />
+    <None Remove=".tools/**;data/**;artifacts/**;tests/**;mt5/*.ex5;mt5/*.log" />
   </ItemGroup>
 </Project>
 
@@ -47,7 +47,7 @@ public sealed class BridgeState
     public List<Signal> Signals { get; set; } = [];
 }
 
-public sealed class Connection
+public sealed record Connection
 {
     public string Id { get; set; } = "demo-mt5";
     public string WebhookKey { get; set; } = Guid.NewGuid().ToString("N");
@@ -60,7 +60,7 @@ public sealed class Connection
     public int Positions { get; set; }
 }
 
-public sealed class Signal
+public sealed record Signal
 {
     public string Id { get; set; } = "";
     public string Action { get; set; } = "";
@@ -105,6 +105,8 @@ public sealed class StateStore : IDisposable
         state = File.Exists(path)
             ? JsonSerializer.Deserialize<BridgeState>(File.ReadAllText(path), json) ?? throw new InvalidDataException("Empty state")
             : new BridgeState();
+        // A persisted heartbeat is not evidence that a terminal is connected after restart.
+        state.Connection = DurableConnection(state.Connection);
         // Never redeliver a possibly executed command after a crash.
         foreach (var signal in state.Signals.Where(s => s.Status == "dispatched"))
         {
@@ -118,7 +120,9 @@ public sealed class StateStore : IDisposable
     {
         using (var stream = new FileStream(path + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None))
         {
-            JsonSerializer.Serialize(stream, value, json);
+            JsonSerializer.Serialize(stream, new BridgeState {
+                AdminKey = value.AdminKey, Connection = DurableConnection(value.Connection), Signals = value.Signals
+            }, json);
             stream.Flush(true);
         }
         File.Move(path + ".tmp", path, true);
@@ -134,13 +138,22 @@ public sealed class StateStore : IDisposable
         lock (gate)
         {
             // Commit to disk before exposing the changed state or delivering a command.
-            var next = JsonSerializer.Deserialize<BridgeState>(JsonSerializer.Serialize(state, json), json)!;
+            var next = new BridgeState {
+                AdminKey = state.AdminKey, Connection = state.Connection with { },
+                Signals = state.Signals.Select(s => s with { }).ToList()
+            };
             var result = change(next);
-            Save(next);
+            if (next.AdminKey != state.AdminKey ||
+                DurableConnection(next.Connection) != DurableConnection(state.Connection) ||
+                !next.Signals.SequenceEqual(state.Signals)) Save(next);
             state = next;
             return result;
         }
     }
+
+    static Connection DurableConnection(Connection value) => value with {
+        LastSeen = null, Balance = 0, Equity = 0, Positions = 0
+    };
 
     public void Dispose() => lease.Dispose();
 }
@@ -205,19 +218,26 @@ app.Use(async (context, next) =>
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-app.MapGet("/api/admin/state", () => store.Change(s =>
-{ Sweep(s); return Results.Json(new {
-    connection = s.Connection,
-    online = Online(s.Connection),
-    signals = s.Signals.AsEnumerable().Reverse().Take(200)
-}); }));
+app.MapGet("/api/admin/state", () =>
+{
+    var cutoff = DateTimeOffset.UtcNow.AddSeconds(-30);
+    if (store.Read(s => s.Signals.Any(x =>
+        (x.Status == "queued" && x.CreatedAt < cutoff) ||
+        (x.Status == "dispatched" && x.DispatchedAt < cutoff))))
+        store.Change(s => { Sweep(s); return true; });
+    return store.Read(s => Results.Json(new {
+        connection = s.Connection,
+        online = Online(s.Connection),
+        signals = s.Signals.AsEnumerable().Reverse().Take(200).ToArray()
+    }));
+});
 
 app.MapPost("/api/webhook/{connectionId}", async (string connectionId, AlertRequest request, HttpRequest http) =>
 {
     var webhookKey = http.Headers["X-Bridge-Key"].FirstOrDefault() ?? request.Secret;
     if (!Equal(webhookKey, store.Read(s => s.Connection.WebhookKey))) return Results.Unauthorized();
-    if (request.Id is null || !Regex.IsMatch(request.Id, "^[A-Za-z0-9_.:-]{1,128}$") ||
-        request.Symbol is null || !Regex.IsMatch(request.Symbol, "^[A-Za-z0-9_.-]{1,32}$") ||
+    if (request.Id is null || !Regex.IsMatch(request.Id, @"\A[A-Za-z0-9_.:-]{1,128}\z") ||
+        request.Symbol is null || !Regex.IsMatch(request.Symbol, @"\A[A-Za-z0-9_.-]{1,32}\z") ||
         request.Action is not ("buy" or "sell" or "close") ||
         !double.IsFinite(request.Lots) || request.Lots <= 0 || request.Lots > 1 ||
         !double.IsFinite(request.SlPoints) || !double.IsFinite(request.TpPoints) ||
@@ -250,7 +270,7 @@ app.MapGet("/api/terminal/poll", async (HttpRequest request) =>
 {
     var account = request.Query["account"].ToString();
     var broker = request.Query["broker"].ToString();
-    if (request.Query["mode"] != "demo" || !Regex.IsMatch(account, "^[0-9]{1,20}$") || broker.Length is < 1 or > 100)
+    if (request.Query["mode"] != "demo" || !Regex.IsMatch(account, @"\A[0-9]{1,20}\z") || broker.Length is < 1 or > 100)
         return Results.BadRequest("Demo account and broker required.");
     var result = store.Change<IResult>(s =>
     {
@@ -436,10 +456,16 @@ bool AccountAllowed()
 
 string EscapeJson(string value)
 {
-   StringReplace(value, "\\", "\\\\"); StringReplace(value, "\"", "\\\"");
-   StringReplace(value, "\r", " "); StringReplace(value, "\n", " ");
-   StringReplace(value, "\t", " ");
-   return value;
+   string result = "";
+   for(int i = 0; i < StringLen(value); i++)
+   {
+      ushort c = StringGetCharacter(value, i);
+      if(c == 34) result += "\\\"";
+      else if(c == 92) result += "\\\\";
+      else if(c < 32) result += StringFormat("\\u%04x", (uint)c);
+      else result += StringSubstr(value, i, 1);
+   }
+   return result;
 }
 
 string UrlEncode(string value)
@@ -629,14 +655,18 @@ $env:DOTNET_CLI_HOME = Join-Path $projectDirectory '.tools/home'
 $env:APPDATA = Join-Path $projectDirectory '.tools/appdata'
 $env:NUGET_PACKAGES = Join-Path $projectDirectory '.tools/nuget'
 $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
+$env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+$env:BRIDGE_DLL = Join-Path $projectDirectory 'artifacts/test-bin/BridgeDemo.dll'
 New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
 & $env:DOTNET_EXE restore --configfile NuGet.Config
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $env:DOTNET_EXE build --no-restore --warnaserror
+& $env:DOTNET_EXE build --no-restore --warnaserror --output artifacts/test-bin
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 node --check wwwroot/app.js
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-node --test tests/integration.mjs
+node --test --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=artifacts/protocol-tests.xml tests/integration.mjs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+node scripts/validation-manifest.mjs
 exit $LASTEXITCODE
 
 `````
@@ -685,14 +715,33 @@ paths = [
     'BridgeDemo.csproj', 'global.json', 'NuGet.Config', 'Models.cs', 'StateStore.cs', 'Program.cs',
     'wwwroot/index.html', 'wwwroot/style.css', 'wwwroot/app.js', 'mt5/RelayDemo.mq5',
     'scripts/run.ps1', 'scripts/test.ps1', 'scripts/check-publish.mjs', 'scripts/prepare-client.ps1', 'scripts/export-file-guide.py',
-    'tests/integration.mjs', 'Dockerfile', '.dockerignore', '.gitignore', '.gitattributes',
+    'scripts/validation-manifest.mjs', 'tests/integration.mjs', 'tests/pentagi/offline-flow.json',
+    'Dockerfile', '.dockerignore', '.gitignore', '.gitattributes',
     '.github/workflows/ci.yml', '.github/workflows/container.yml',
 ]
 parts = ['# Authored file contents\n\nPaths are relative to the repository root. Generated data, local tools and third-party dependency code are deliberately excluded. See FILES.md and the dependency license.\n']
 for name in paths:
     parts.append(f'\n## {name}\n\n`````text\n{(root / name).read_text(encoding="utf-8")}\n`````\n')
-(root / 'docs' / 'FILE-CONTENTS.md').write_text(''.join(parts), encoding='utf-8')
+(root / 'docs' / 'FILE-CONTENTS.md').write_text(''.join(parts), encoding='utf-8', newline='\n')
 print(f'Exported {len(paths)} source/config files')
+
+`````
+
+## scripts/validation-manifest.mjs
+
+`````text
+import {createHash} from 'node:crypto';
+import {readFile,mkdir,writeFile} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
+
+const files=['BridgeDemo.csproj','global.json','NuGet.Config','Program.cs','StateStore.cs','Models.cs','mt5/RelayDemo.mq5','tests/integration.mjs','tests/pentagi/offline-flow.json','.github/workflows/ci.yml'];
+const hashes={};
+for(const file of files) hashes[file]=createHash('sha256').update(await readFile(file)).digest('hex');
+const sourceRevision=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+const dotnetVersion=execFileSync(process.env.DOTNET_EXE||'dotnet',['--version'],{encoding:'utf8'}).trim();
+await mkdir('artifacts',{recursive:true});
+await writeFile('artifacts/validation-manifest.json',JSON.stringify({sourceRevision,nodeVersion:process.version,dotnetVersion,hashes,scope:'synthetic loopback only; no broker'},null,2));
+console.log('Validation manifest saved; source hashes and runtime versions only.');
 
 `````
 
@@ -702,33 +751,35 @@ print(f'Exported {len(paths)} source/config files')
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, stat, utimes, rmdir } from 'node:fs/promises';
 import { once } from 'node:events';
 import net from 'node:net';
 import path from 'node:path';
 
 test('HTTP, SignalR, durable command lifecycle and restart recovery (no broker)', {timeout:45000}, async t => {
-  await mkdir('artifacts', {recursive:true});
-  const directory = await mkdtemp(path.resolve('artifacts/test-'));
+  const artifacts=path.resolve(process.env.BRIDGE_TEST_ARTIFACTS || 'artifacts');
+  await mkdir(artifacts, {recursive:true});
+  const directory = await mkdtemp(path.join(artifacts,'test-'));
   const listener = net.createServer(); listener.listen(0,'127.0.0.1'); await once(listener,'listening');
   const port = listener.address().port; await new Promise(resolve => listener.close(resolve));
+  assert.notEqual(port,5080,'tests must never use the MT5-connected preview port');
   const base = `http://127.0.0.1:${port}`;
   const dotnet = process.env.DOTNET_EXE || 'dotnet';
   const dll = process.env.BRIDGE_DLL || path.resolve('bin/Debug/net10.0/BridgeDemo.dll');
   let server, output = '';
   async function start() {
     output = '';
-    server = spawn(dotnet, [dll], {env:{...process.env,BRIDGE_DATA:directory,ASPNETCORE_URLS:base},stdio:['ignore','pipe','pipe']});
+    server = spawn(dotnet, [dll], {env:{...process.env,BRIDGE_DATA:directory,ASPNETCORE_URLS:base,DOTNET_PROCESSOR_COUNT:'1'},stdio:['ignore','pipe','pipe']});
     server.stdout.on('data', b => output += b); server.stderr.on('data', b => output += b);
     server.on('error', e => { output += e.message; });
     for(let i=0;i<150;i++) {
-      if(server.exitCode !== null) throw new Error(`Server exited: ${output}`);
+      if(server.exitCode !== null) throw new Error(`Server exited: ${output.replace(/\b[0-9a-f]{32}\b/gi,'<TEST-KEY-REDACTED>')}`);
       try { if((await fetch(`${base}/health`)).ok) return; } catch {}
       await new Promise(resolve => setTimeout(resolve,100));
     }
-    throw new Error(`Server not ready: ${output}`);
+    throw new Error(`Server not ready: ${output.replace(/\b[0-9a-f]{32}\b/gi,'<TEST-KEY-REDACTED>')}`);
   }
-  async function stop() { if(server && server.exitCode === null) { const exited = once(server,'exit'); server.kill(); await exited; } }
+  async function stop() { if(server && server.exitCode === null && server.signalCode === null) { const exited = once(server,'exit'); server.kill(); await exited; } }
   t.after(stop); await start();
   const statePath = path.join(directory,'state.json');
   const secrets = JSON.parse(await readFile(statePath,'utf8'));
@@ -743,6 +794,36 @@ test('HTTP, SignalR, durable command lifecycle and restart recovery (no broker)'
   assert.equal((await request('/api/webhook/demo-mt5',webhook,alert)).status,409,'offline terminal blocks stale orders');
   assert.equal((await request(poll.replace('mode=demo','mode=live'),terminal)).status,400);
   assert.equal((await request(poll,terminal)).status,204);
+  await t.test('unchanged dashboard and heartbeat do not rewrite durable state',async()=>{
+    const saved=await readFile(statePath,'utf8');
+    const sentinel=new Date('2000-01-01T00:00:00Z'); await utimes(statePath,sentinel,sentinel);
+    const timestamp=(await stat(statePath)).mtimeMs;
+    await request('/api/admin/state',admin);
+    await request(poll.replace('balance=10000','balance=10001'),terminal);
+    const current=await (await request('/api/admin/state',admin)).json();
+    assert.equal(current.connection.balance,10001,'telemetry is updated in memory');
+    assert.ok((await readFile(statePath,'utf8'))===saved,'read/telemetry must not change durable content');
+    assert.equal((await stat(statePath)).mtimeMs,timestamp,'read/telemetry must not rewrite the file');
+  });
+  await t.test('control characters and oversized identity fields are rejected without enqueueing',async()=>{
+    for(const invalid of ['valid\n','valid\r','valid\r\n','mid\ndle','tab\tvalue','nul\0value']) {
+      assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,id:invalid})).status,400);
+      assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,symbol:invalid})).status,400);
+    }
+    assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,id:'a'.repeat(129)})).status,400);
+    assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,symbol:'a'.repeat(33)})).status,400);
+    assert.equal((await request(poll.replace('12345','12345%0A'),terminal)).status,400);
+    assert.equal((await request(poll,terminal)).status,204,'invalid commands never enter the queue');
+  });
+  await t.test('failed durable save cannot publish a queued command',async()=>{
+    await mkdir(statePath+'.tmp');
+    try {
+      assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,id:'failed-save'})).status,500);
+    } finally { await rmdir(statePath+'.tmp'); }
+    const snapshot=await (await request('/api/admin/state',admin)).json();
+    assert.equal(snapshot.signals.length,0,'failed transaction must not leak into memory');
+    assert.equal((await request(poll,terminal)).status,204,'failed command must never be delivered');
+  });
   assert.equal((await request(poll.replace('12345','99999'),terminal)).status,409,'account identity is bound');
   assert.equal((await request('/api/webhook/demo-mt5',terminal,alert)).status,401);
   assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,lots:50})).status,400);
@@ -769,8 +850,23 @@ test('HTTP, SignalR, durable command lifecycle and restart recovery (no broker)'
   assert.equal((await request('/api/terminal/result',terminal,result)).status,200);
   assert.equal((await request('/api/terminal/result',terminal,result)).status,200,'result retries are idempotent');
   assert.equal((await request('/api/terminal/result',terminal,{...result,status:'closed'})).status,409);
+  await t.test('maximum-length identity and JSON result strings round-trip exactly',async()=>{
+    const boundary={...alert,id:'a'.repeat(128),symbol:'s'.repeat(32)};
+    assert.equal((await request('/api/webhook/demo-mt5',webhook,boundary)).status,202);
+    const persisted=JSON.parse(await readFile(statePath,'utf8'));
+    assert.equal(persisted.signals.at(-1).status,'queued','acceptance is durable');
+    assert.equal(await (await request(poll,terminal)).text(),`v1|${boundary.id}|buy|${boundary.symbol}|0.01|200|400`);
+    const dispatched=JSON.parse(await readFile(statePath,'utf8'));
+    assert.equal(dispatched.signals.at(-1).status,'dispatched','dispatch is durable before delivery');
+    const detail='quote " slash \\ controls \n\r\t\b\f\u0001 unicode €';
+    assert.equal((await request('/api/terminal/result',terminal,{id:boundary.id,status:'rejected',ticket:'',detail})).status,200);
+    const snapshot=await (await request('/api/admin/state',admin)).json();
+    assert.equal(snapshot.signals[0].id,boundary.id);
+    assert.equal(snapshot.signals[0].symbol,boundary.symbol);
+    assert.equal(snapshot.signals[0].detail,detail);
+  });
   const dashboard = await (await request('/api/admin/state',admin)).json();
-  assert.equal(dashboard.signals[0].status,'filled'); assert.equal(dashboard.connection.equity,9999);
+  assert.equal(dashboard.signals.find(s=>s.id===alert.id).status,'filled'); assert.equal(dashboard.connection.equity,9999);
   for(let i=0;i<20&&!messages.some(m=>m.includes('changed'));i++) await new Promise(resolve=>setTimeout(resolve,50));
   assert.ok(messages.some(m=>m.includes('changed')),'SignalR broadcasts actual state changes');
   ws.close();
@@ -780,6 +876,8 @@ test('HTTP, SignalR, durable command lifecycle and restart recovery (no broker)'
   assert.equal((await request(poll,terminal)).status,200);
   await stop(); await start();
   const recovered = await (await request('/api/admin/state',admin)).json();
+  assert.equal(recovered.online,false,'restart requires a fresh heartbeat');
+  assert.equal(recovered.connection.lastSeen,null,'stale persisted telemetry is discarded');
   assert.equal(recovered.signals[0].status,'unknown','restart does not redeliver an uncertain trade');
   assert.equal((await request(poll,terminal)).status,204);
   assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,id:'blocked-after-restart'})).status,409);
@@ -789,10 +887,60 @@ test('HTTP, SignalR, durable command lifecycle and restart recovery (no broker)'
   await stop();
   const saved=JSON.parse(await readFile(statePath,'utf8')); saved.signals.find(s=>s.id==='expires').createdAt='2000-01-01T00:00:00Z';
   await writeFile(statePath,JSON.stringify(saved)); await start();
-  assert.equal((await request(poll,terminal)).status,204);
   const expired=await (await request('/api/admin/state',admin)).json();
   assert.equal(expired.signals[0].status,'expired');
+  const expiredOnDisk=JSON.parse(await readFile(statePath,'utf8'));
+  assert.equal(expiredOnDisk.signals.find(s=>s.id==='expires').status,'expired','dashboard maintenance persists actual transitions');
+  assert.equal((await request(poll,terminal)).status,204);
+  await t.test('large histories retain command safety without read or heartbeat writes',async()=>{
+    const measurements=[];
+    for(const count of [0,1000,9999]) {
+      await stop();
+      const fixture=JSON.parse(await readFile(statePath,'utf8'));
+      fixture.signals=Array.from({length:count},(_,i)=>({...alert,id:`fixture-${i}`,status:'rejected',createdAt:'2000-01-01T00:00:00Z'}));
+      await writeFile(statePath,JSON.stringify(fixture)); await start();
+      const sentinel=new Date('2000-01-01T00:00:00Z'); await utimes(statePath,sentinel,sentinel);
+      const stamp=(await stat(statePath)).mtimeMs;
+      const times=[];
+      for(let i=0;i<5;i++) {
+        const begin=performance.now();const response=await request('/api/admin/state',admin);
+        assert.equal(response.status,200);const data=await response.json();
+        times.push(performance.now()-begin);assert.equal(data.signals.length,Math.min(count,200));
+        await new Promise(resolve=>setTimeout(resolve,350));
+      }
+      assert.equal((await request(poll,terminal)).status,204);
+      assert.equal((await stat(statePath)).mtimeMs,stamp,'history reads and heartbeat must not rewrite the journal');
+      times.sort((a,b)=>a-b);
+      measurements.push({completedRecords:count,medianMs:+times[2].toFixed(2),maxMs:+times[4].toFixed(2),requests:5,concurrency:1,journalRewritten:false});
+    }
+    const accepted={...alert,id:'after-large-history'};
+    assert.equal((await request('/api/webhook/demo-mt5',webhook,accepted)).status,202,'one free journal slot remains');
+    assert.equal((await request(poll,terminal)).status,200);
+    await stop();await start();
+    const snapshot=await (await request('/api/admin/state',admin)).json();
+    assert.equal(snapshot.signals[0].status,'unknown','large histories retain restart safety');
+    await writeFile(path.join(artifacts,'validation-metrics.json'),JSON.stringify({scope:'synthetic loopback only; no broker',measurements},null,2));
+  });
 });
+
+`````
+
+## tests/pentagi/offline-flow.json
+
+`````text
+{
+  "provider": "ollama",
+  "input": "Owner-authorized supervised OFFLINE validation of this original Relay demo copy only. The operator must verify a worker with only loopback networking, no external route, no Docker socket, no privileged mode, and a case-only /work mount before starting this flow. Require preinstalled Node.js 22+ and .NET 10, source /opt/target, and a prebuilt /opt/bridge-bin/BridgeDemo.dll. Do not test MT5, brokers, the host, other containers, other systems or the Internet. Do not install software or modify source. Run exactly once through terminal: cd /opt/target && DOTNET_EXE=dotnet BRIDGE_DLL=/opt/bridge-bin/BridgeDemo.dll BRIDGE_TEST_ARTIFACTS=/work/validation node --test tests/integration.mjs . This fixed suite creates fresh synthetic keys and uses its own ephemeral loopback port, never the running preview. Do not rerun it or add extra HTTP tests. Read /work/validation/validation-metrics.json using terminal with that exact absolute path. Report test exit status, actual failures and measured timings; never output fixture credentials or claim a failed read succeeded. Write /work/report.md and finish. If prerequisites are missing, stop and report the limitation. This is supervised regression verification, not independent discovery or a complete security audit.",
+  "functions": {
+    "disabled": [
+      {"name":"search","context":["agent","adviser","coder","searcher","generator","memorist","enricher","reporter","assistant"]},
+      {"name":"search_answer","context":["agent","adviser","coder","searcher","generator","memorist","enricher","reporter","assistant"]},
+      {"name":"web_search","context":["agent","adviser","coder","searcher","generator","memorist","enricher","reporter","assistant"]},
+      {"name":"browser","context":["agent","adviser","coder","searcher","generator","memorist","enricher","reporter","assistant"]},
+      {"name":"maintenance","context":["agent","adviser","coder","searcher","generator","memorist","enricher","reporter","assistant"]}
+    ]
+  }
+}
 
 `````
 
@@ -864,6 +1012,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -875,9 +1024,21 @@ jobs:
       - run: dotnet restore --configfile NuGet.Config
       - run: dotnet build --no-restore --configuration Release --warnaserror
       - run: node --check wwwroot/app.js
-      - run: node --test tests/integration.mjs
+      - run: mkdir -p artifacts
+      - run: node --test --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=artifacts/protocol-tests.xml tests/integration.mjs
         env:
           BRIDGE_DLL: bin/Release/net10.0/BridgeDemo.dll
+      - run: node scripts/validation-manifest.mjs
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relay-validation-${{ github.sha }}
+          path: |
+            artifacts/protocol-tests.xml
+            artifacts/validation-metrics.json
+            artifacts/validation-manifest.json
+          if-no-files-found: warn
       - run: dotnet publish --no-restore --configuration Release --output artifacts/publish
       - run: node scripts/check-publish.mjs artifacts/publish
       - uses: actions/upload-artifact@v4

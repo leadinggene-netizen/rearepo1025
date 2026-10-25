@@ -18,6 +18,9 @@ All paths below are relative to your repository checkout root (the local working
 | `mt5/RelayDemo.mq5` | Independently authored demo-only EA: WebRequest transport, account checks, result journal and CTrade execution |
 | `scripts/run.ps1` | Project-local tool environment, restore/build and foreground portal start |
 | `scripts/test.ps1` | Build, JavaScript syntax check and loopback integration suite |
+| `scripts/validation-manifest.mjs` | Credential-free source hashes and runtime versions for validation artifacts |
+| `tests/pentagi/offline-flow.json` | Reusable self-hosted, offline PentAGI regression profile with research tools disabled |
+| `docs/SECURITY-VALIDATION.md` | Regression command, persistence changes, CI artifacts and isolated PentAGI procedure |
 | `scripts/check-publish.mjs` | Rejects accidental publication of local state, tools and test directories |
 | `scripts/prepare-client.ps1` | Re-fetch the pinned official SignalR browser client/license |
 | `tests/integration.mjs` | Node built-in tests for HTTP, SignalR, authentication, account binding, idempotency, expiry and restart recovery; no broker |

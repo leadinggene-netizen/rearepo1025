@@ -1,5 +1,19 @@
 # Verification record
 
+## Post-assessment improvements — 25 October 2026
+
+The updated local suite passes all six reported test cases (the parent protocol scenario plus five focused subtests), including control-character rejection, boundary-length IDs/symbols, exact JSON result strings, failed-save rollback, persistence-before-dispatch, restart recovery, dashboard-driven expiry and no-write reads/heartbeats at 9,999 records. Both new core regressions were first observed failing against the old implementation: LF accepted as 202 rather than 400, and read/heartbeat requests changing durable state.
+
+Local five-sample dashboard medians were about 19/22/22 ms at 0/1000/9999 completed records with one .NET logical processor; none rewrote the journal. These observations use the local machine and cannot be directly compared to the earlier cloud timing numbers. The changed EA compiled with zero errors/warnings. It was not attached or reloaded in the user's active MT5 terminal for this change. The Docker Cloud sandbox remains paused.
+
+The test command now writes JUnit, timing metrics and a source/runtime manifest. The GitHub workflow archives only those explicit sanitized files, never generated state directories. This workflow change was exercised through the same local reporter arguments; no new GitHub Actions run is claimed before publication. See SECURITY-VALIDATION.md for the command and offline profile.
+
+A fresh Release publish and the publish-boundary checker also passed. The check first caught the new test-profile JSON entering ASP.NET's default content set; explicit project exclusions now keep all test assets out of server publication.
+
+Code review: skipped (ce-code-review unavailable). The portable review pipeline requires independent reviewer/finish contexts; current project instructions require agent work to run sequentially in the main context. No independent review receipt is claimed. A sequential manual diff scan covered request contracts, record-copy isolation, failed-save rollback, durable transition ordering, transient telemetry, snapshot immutability, restart/expiry behavior, JSON escaping, CI credential boundaries, and test/profile scope. No unresolved blocking finding was identified. Simplification was performed inline under the same project constraint; proof tests were retained.
+
+The record below describes the original implementation checks and their historical limitations.
+
 Verified locally on 25 October 2026, Windows, .NET SDK 10.0.402 and Node 22.23.1.
 
 ## Completed checks

@@ -7,6 +7,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -18,9 +19,21 @@ jobs:
       - run: dotnet restore --configfile NuGet.Config
       - run: dotnet build --no-restore --configuration Release --warnaserror
       - run: node --check wwwroot/app.js
-      - run: node --test tests/integration.mjs
+      - run: mkdir -p artifacts
+      - run: node --test --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=artifacts/protocol-tests.xml tests/integration.mjs
         env:
           BRIDGE_DLL: bin/Release/net10.0/BridgeDemo.dll
+      - run: node scripts/validation-manifest.mjs
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relay-validation-${{ github.sha }}
+          path: |
+            artifacts/protocol-tests.xml
+            artifacts/validation-metrics.json
+            artifacts/validation-manifest.json
+          if-no-files-found: warn
       - run: dotnet publish --no-restore --configuration Release --output artifacts/publish
       - run: node scripts/check-publish.mjs artifacts/publish
       - uses: actions/upload-artifact@v4

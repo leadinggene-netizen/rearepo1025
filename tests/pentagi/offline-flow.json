@@ -1,0 +1,13 @@
+{
+  "provider": "ollama",
+  "input": "Owner-authorized supervised OFFLINE validation of this original Relay demo copy only. The operator must verify a worker with only loopback networking, no external route, no Docker socket, no privileged mode, and a case-only /work mount before starting this flow. Require preinstalled Node.js 22+ and .NET 10, source /opt/target, and a prebuilt /opt/bridge-bin/BridgeDemo.dll. Do not test MT5, brokers, the host, other containers, other systems or the Internet. Do not install software or modify source. Run exactly once through terminal: cd /opt/target && DOTNET_EXE=dotnet BRIDGE_DLL=/opt/bridge-bin/BridgeDemo.dll BRIDGE_TEST_ARTIFACTS=/work/validation node --test tests/integration.mjs . This fixed suite creates fresh synthetic keys and uses its own ephemeral loopback port, never the running preview. Do not rerun it or add extra HTTP tests. Read /work/validation/validation-metrics.json using terminal with that exact absolute path. Report test exit status, actual failures and measured timings; never output fixture credentials or claim a failed read succeeded. Write /work/report.md and finish. If prerequisites are missing, stop and report the limitation. This is supervised regression verification, not independent discovery or a complete security audit.",
+  "functions": {
+    "disabled": [
+      {"name":"search","context":["agent","adviser","coder","searcher","generator","memorist","enricher","reporter","assistant"]},
+      {"name":"search_answer","context":["agent","adviser","coder","searcher","generator","memorist","enricher","reporter","assistant"]},
+      {"name":"web_search","context":["agent","adviser","coder","searcher","generator","memorist","enricher","reporter","assistant"]},
+      {"name":"browser","context":["agent","adviser","coder","searcher","generator","memorist","enricher","reporter","assistant"]},
+      {"name":"maintenance","context":["agent","adviser","coder","searcher","generator","memorist","enricher","reporter","assistant"]}
+    ]
+  }
+}
