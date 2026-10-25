@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {readFile,mkdir,writeFile} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 
-const files=['BridgeDemo.csproj','global.json','NuGet.Config','Program.cs','StateStore.cs','Models.cs','mt5/RelayDemoRemote.mq5','deploy/relay.service','deploy/relay.nginx.conf','deploy/install-release.sh','tests/integration.mjs','tests/pentagi/offline-flow.json','.github/workflows/ci.yml'];
+const files=['BridgeDemo.csproj','packages.lock.json','global.json','NuGet.Config','Program.cs','StateStore.cs','Models.cs','BridgeMaintenance.cs','scripts/db-maintenance.py','mt5/RelayDemoRemote.mq5','deploy/relay.service','deploy/relay.nginx.conf','deploy/install-release.sh','tests/integration.mjs','tests/pentagi/offline-flow.json','.github/workflows/ci.yml'];
 const hashes={};
 for(const file of files) hashes[file]=createHash('sha256').update(await readFile(file)).digest('hex');
 const sourceRevision=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();

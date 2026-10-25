@@ -1,5 +1,13 @@
 # Verification record
 
+## Current SQLite delivery update
+
+The current suite exercises transactional storage: migration with preserved credentials/history and paused execution; authenticated offline receipts and secret redaction; persistent duplicates/conflicts; FIFO/single dispatch; pause, stale-event and expiry behavior; changed risk policy; exact identities/result strings; no-write dashboard/telemetry; unknown-result recovery; failed-transaction rollback; older IDs beyond the recent window; consistent backup and safe restore; and real SignalR notifications. Source/CI artifacts remain sanitized and the VPS is not used for synthetic orders. The Windows UI test used isolated port5081 and synthetic credentials, with execution paused and no terminal.
+
+Code review: skipped (ce-code-review unavailable). Project instructions require review work in the main thread, while the portable pipeline requires independent contexts. Serial manual review checked credential boundaries, SQL parameterization, atomic receipt/command changes, failure before acknowledgement, bounded cache/queue, older-ID lookup, restart/restore replay prevention, migration preflight, UI policy refresh races, dependency locking, packaging and secret-free logs. Fixes include DI-owned store disposal, refusing to reset missing database settings, stopping delivery after serious SQLite I/O errors, and refusing legacy automatic rollback against migrated state. No independent review is claimed.
+
+## Historical JSON implementation
+
 ## Post-assessment improvements — 25 October 2026
 
 The updated local suite passes all six reported test cases (the parent protocol scenario plus five focused subtests), including control-character rejection, boundary-length IDs/symbols, exact JSON result strings, failed-save rollback, persistence-before-dispatch, restart recovery, dashboard-driven expiry and no-write reads/heartbeats at 9,999 records. Both new core regressions were first observed failing against the old implementation: LF accepted as 202 rather than 400, and read/heartbeat requests changing durable state.

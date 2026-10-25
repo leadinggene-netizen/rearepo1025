@@ -17,8 +17,23 @@ tar -xzf "$archive" -C "$release" --no-same-owner
 test -f "$release/BridgeDemo.dll"
 chown -R root:root "$release"
 chmod -R go-w "$release"
-install -m 0644 "$release/deploy/relay.service" /etc/systemd/system/relay.service
 previous=$(readlink -f /opt/relay/current || true)
+if [[ -f /var/lib/relay/bridge.db ]]; then
+  python3 -c 'import json,sys; assert json.load(open(sys.argv[1])).get("storageFormat")=="sqlite-v1", "Refusing a legacy application against a SQLite data directory"' "$release/release.json"
+fi
+install -d -m 0700 /var/backups/relay
+snapshot="/var/backups/relay/pre-$2"
+test ! -e "$snapshot"
+install -d -m 0700 "$snapshot/state" "$snapshot/preflight"
+if systemctl cat relay.service >/dev/null 2>&1; then systemctl stop relay.service; fi
+cp -a /var/lib/relay/. "$snapshot/state/"
+cp -a "$snapshot/state/." "$snapshot/preflight/"
+if ! BRIDGE_DATA="$snapshot/preflight" /usr/bin/dotnet "$release/BridgeDemo.dll" --verify-data; then
+  echo 'Migration preflight failed on an isolated copy; active state was not migrated.' >&2
+  if [[ -n "$previous" ]]; then systemctl start relay.service; fi
+  exit 1
+fi
+install -m 0644 "$release/deploy/relay.service" /etc/systemd/system/relay.service
 ln -s "$release" /opt/relay/current.next
 mv -Tf /opt/relay/current.next /opt/relay/current
 systemctl daemon-reload
@@ -32,11 +47,12 @@ done
 if [[ $healthy != 1 ]]; then
   echo 'Release failed health check.' >&2
   systemctl stop relay.service
-  if [[ -n "$previous" && -d "$previous" ]]; then
+  if [[ -n "$previous" && -d "$previous" ]] && python3 -c 'import json,sys; assert json.load(open(sys.argv[1])).get("storageFormat")=="sqlite-v1"' "$previous/release.json"; then
     ln -s "$previous" /opt/relay/current.rollback
     mv -Tf /opt/relay/current.rollback /opt/relay/current
     systemctl start relay.service
   fi
+  echo "State retained. Pre-deployment copy: $snapshot/state. Legacy rollback requires an explicit reconciled state restore." >&2
   exit 1
 fi
 install -d -m 0700 /opt/relay/config-backups
@@ -48,4 +64,8 @@ if ! nginx -t; then
   exit 1
 fi
 systemctl reload nginx
+install -m 0644 "$release/deploy/relay-backup.service" /etc/systemd/system/relay-backup.service
+install -m 0644 "$release/deploy/relay-backup.timer" /etc/systemd/system/relay-backup.timer
+systemctl daemon-reload
+systemctl enable --now relay-backup.timer
 echo "Relay release $2 is healthy. Persistent state was retained."

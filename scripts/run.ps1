@@ -13,7 +13,7 @@ $env:NUGET_PACKAGES = Join-Path $projectDirectory '.tools/nuget'
 $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 if (-not (Test-Path -LiteralPath 'wwwroot/vendor/signalr.min.js')) { & "$PSScriptRoot/prepare-client.ps1" }
 if (-not $NoBuild) {
-    & $dotnetCommand restore --configfile NuGet.Config
+    & $dotnetCommand restore --configfile NuGet.Config --locked-mode
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & $dotnetCommand build --no-restore
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

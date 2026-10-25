@@ -17,6 +17,8 @@ The portal opens before MT5 is connected. It displays **Offline** and disables s
 
 Open **https://relay.tradingviewtometatraders.com**. The server runs on the Ubuntu VPS; MT5 remains on Windows. It uses fresh credentials. See [docs/VPS.md](docs/VPS.md) for retrieving the admin key, switching to `mt5/RelayDemoRemote.mq5`, server paths, updates and rollback. Keep only one Relay EA attached when migrating from localhost.
 
+TradingView automation now uses a transactional SQLite receipt ledger and FIFO command queue. Start with [docs/TRADINGVIEW.md](docs/TRADINGVIEW.md). A database migration starts execution **paused**, with no allowed symbols; configure the exact symbols, lot cap and expiry before enabling execution. Offline/paused alerts are stored and retain their expiry.
+
 ## Connect your MT5 demo account
 
 1. Sign in to your intended **demo** account in your broker's Windows MT5 terminal. Note the account login number. Do not enter the broker password in this project.
@@ -62,7 +64,7 @@ POST to `http://127.0.0.1:5080/api/webhook/demo-mt5`. This example is executable
 
 `queued → dispatched → filled / closed / rejected / unknown`
 
-Queued commands expire after 30 seconds. Dispatch is persisted before a terminal receives a command. A dispatched command is never automatically delivered again. A server restart or a missing result leaves an unknown outcome. The EA writes a local result journal before touching the broker and retries reporting that journal, rather than placing the trade again. This favors avoiding duplicate trades over guaranteed delivery; it does not claim exactly-once execution across the broker and local disks.
+Queued commands expire after the configured lifetime (30 seconds by default), capped by an optional producer timestamp. Receipts and commands commit together before acknowledgement. Commands queue in order, with at most one dispatched command; an unknown outcome blocks further dispatch. A dispatched command is never automatically delivered again. The EA writes a local result journal before touching the broker and retries reporting that journal, rather than placing the trade again. This favors avoiding duplicate trades over guaranteed delivery; it does not claim exactly-once execution across the broker and local disks.
 
 An `unknown` result blocks new commands. Inspect MT5 positions/history first, then use **Acknowledge after checking MT5**. Acknowledgement does not send, close, reverse or prove a trade. The full details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -93,7 +95,7 @@ Tests use separate temporary state directories and a fake terminal protocol clie
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): GitHub version control, CI, packaging and production gaps.
 - Remote: https://github.com/leadinggene-netizen/rearepo1025
 
-Keep `.tools`, `data`, `artifacts`, `bin`, `obj`, EA logs/binaries and all secrets out of Git. State and generated credentials live in `data/state.json`. Preserve this directory across restarts; deleting it loses request history, keys and account binding. Back it up with access restricted to the operator. Run one server process against a data directory; an exclusive lock prevents accidental concurrent writers.
+Keep `.tools`, `data`, `artifacts`, `bin`, `obj`, EA logs/binaries and all secrets out of Git. State and credentials live in `data/bridge.db` (on the VPS: `/var/lib/relay/bridge.db`). Preserve the entire data directory across restarts. Use the SQLite backup operation rather than copying a live WAL database. An exclusive lease prevents concurrent server writers. Legacy JSON is retained after its one-time migration.
 
 ## Scope
 

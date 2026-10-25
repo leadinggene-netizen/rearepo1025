@@ -10,7 +10,7 @@ $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:BRIDGE_DLL = Join-Path $projectDirectory 'artifacts/test-bin/BridgeDemo.dll'
 New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
-& $env:DOTNET_EXE restore --configfile NuGet.Config
+& $env:DOTNET_EXE restore --configfile NuGet.Config --locked-mode
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $env:DOTNET_EXE build --no-restore --warnaserror --output artifacts/test-bin
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

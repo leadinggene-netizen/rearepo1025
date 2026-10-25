@@ -40,7 +40,7 @@ HTTPS ingress, a restricted reverse proxy, per-IP request limits, persistent ser
 
 1. Separate public webhook ingress from operator/terminal interfaces; deploy HTTPS with deliberate network and proxy trust rules. Keep the admin portal private.
 2. Replace the single local connection with tenant/account authorization, scoped credential issuance/rotation and audited access. Encrypt stored secrets with a managed key service.
-3. Use a transactional database and durable command/result records. Add reconciliation against broker trade identifiers; do not promise exactly-once trading on the basis of message delivery.
+3. The single-server demo now uses transactional SQLite records. Extend reconciliation against broker trade identifiers before a broader offering; do not promise exactly-once trading on the basis of message delivery.
 4. Add bounded authenticated ingress, request-rate controls, operator auditing, backup/restore and retention tests. Ensure logs redact tokens and webhook secrets.
 5. Extend the existing HTTPS polling adapter for any additional endpoint/account requirements. `RelayDemoRemote.mq5` supports the exact deployed origin; the original `RelayDemo.mq5` remains local-only. Retain explicit account binding and connection ownership.
 6. Publish immutable releases, test migrations and rollback, and require a reviewed demo-account acceptance test before broker-capable changes are released.
@@ -49,4 +49,4 @@ The deployed demo webhook can accept TradingView alerts after the intended demo 
 
 ## State and secrets
 
-`data/state.json` contains generated keys and account metadata. `.gitignore` and `.dockerignore` exclude it. `.tools` contains local SDK/compiler copies; these are not redistributed. The included SignalR browser dependency retains its Microsoft MIT license. Rebuild rather than copying arbitrary local runtime directories into deployment images.
+`data/bridge.db` contains credentials, account metadata and command/receipt history. Legacy `state.json` remains as a migration artifact. Git and Docker exclusions cover database/WAL files and local state. `.tools` contains private local tools and backups and is never redistributed. The SignalR browser dependency retains its Microsoft MIT license; the SQLite provider is restored from the version-locked official NuGet source. Rebuild rather than copying arbitrary runtime directories.

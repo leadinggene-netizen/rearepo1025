@@ -1,0 +1,15 @@
+[Unit]
+Description=Create and integrity-check a private Relay database backup
+After=relay.service
+
+[Service]
+Type=oneshot
+User=relay
+Group=relay
+UMask=0077
+ExecCondition=/usr/bin/test -f /var/lib/relay/bridge.db
+ExecStart=/usr/bin/python3 /opt/relay/current/scripts/db-maintenance.py backup /var/lib/relay/bridge.db /var/lib/relay/backups
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/relay

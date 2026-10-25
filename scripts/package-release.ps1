@@ -12,14 +12,16 @@ $directory = Join-Path (Get-Location) "artifacts/releases/$ReleaseId"
 if (Test-Path -LiteralPath $directory) { throw 'Release directory already exists' }
 $app = Join-Path $directory 'app'
 New-Item -ItemType Directory -Path $app -Force | Out-Null
-& $sdk restore --configfile NuGet.Config
+& $sdk restore --configfile NuGet.Config --locked-mode
 if ($LASTEXITCODE -ne 0) { throw 'Restore failed' }
 & $sdk publish --configuration Release --no-restore --output $app
 if ($LASTEXITCODE -ne 0) { throw 'Publish failed' }
 node scripts/check-publish.mjs $app
 if ($LASTEXITCODE -ne 0) { throw 'Publish boundary check failed' }
 Copy-Item -LiteralPath deploy -Destination $app -Recurse
-$metadata = @{ releaseId=$ReleaseId; sourceRevision=(git rev-parse HEAD); workingTreeDirty=[bool](git status --porcelain); createdAtUtc=(Get-Date).ToUniversalTime().ToString('o') }
+New-Item -ItemType Directory -Path (Join-Path $app 'scripts') -Force | Out-Null
+Copy-Item -LiteralPath scripts/db-maintenance.py -Destination (Join-Path $app 'scripts')
+$metadata = @{ releaseId=$ReleaseId; storageFormat='sqlite-v1'; sourceRevision=(git rev-parse HEAD); workingTreeDirty=[bool](git status --porcelain); createdAtUtc=(Get-Date).ToUniversalTime().ToString('o') }
 $metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $app 'release.json') -Encoding utf8NoBOM
 $archive = Join-Path $directory "relay-$ReleaseId.tar.gz"
 tar -czf $archive -C $app .

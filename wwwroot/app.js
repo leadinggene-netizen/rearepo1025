@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-let adminKey = '', current, connection, noticeTimer;
+let adminKey = '', current, connection, noticeTimer, policyDirty = false, refreshGeneration = 0;
 function notify(text) { $('message').textContent = text; $('message').style.display = 'block'; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => $('message').style.display = 'none', 7000); }
 async function api(path, options = {}, key = adminKey) {
   const response = await fetch(path, { ...options, headers: { 'X-Bridge-Key': key, 'Content-Type': 'application/json', ...options.headers } });
@@ -7,8 +7,20 @@ async function api(path, options = {}, key = adminKey) {
   return response.status === 204 ? null : response.json().catch(() => null);
 }
 function cell(row, text, className) { const td = row.insertCell(); td.textContent = text; if (className) td.className = className; return td; }
+function executionState() {
+  if (!current) return;
+  const p = current.policy, q = current.queue;
+  $('queue-status').textContent = `${q.queued} / ${q.capacity} queued`;
+  $('execution-note').textContent = q.blocked ? 'Execution blocked: inspect the unknown result in MT5 before acknowledging it.' : p.paused ? 'Execution paused. Incoming authenticated alerts are still recorded.' : !current.online ? 'MT5 is offline. Received commands expire at their original deadline.' : 'Execution enabled under your saved symbol and lot limits.';
+  const allowed = p.allowedSymbols.includes($('symbol').value.trim()) && Number($('lots').value) <= p.maxLots;
+  $('send').disabled = !current.online || p.paused || q.blocked || q.queued >= q.capacity || !allowed;
+  $('send-note').textContent = !allowed ? 'Use an allowed symbol and a lot size within the saved policy.' : p.paused ? 'Enable execution in the policy before sending manually.' : q.blocked ? 'Reconcile the unknown result first.' : !current.online ? 'Connect the EA first.' : 'This queues an actual instruction for your demo account.';
+}
 async function refresh() {
-  current = await api('/api/admin/state');
+  const generation = ++refreshGeneration;
+  const [state, history] = await Promise.all([api('/api/admin/state'), api('/api/admin/receipts')]);
+  if (generation !== refreshGeneration) return;
+  current = state;
   const c = current.connection;
   $('terminal-status').textContent = current.online ? 'Connected' : 'Offline';
   $('account-label').textContent = c.account ? `${c.account} / ${c.broker}` : 'Awaiting MT5';
@@ -16,9 +28,13 @@ async function refresh() {
   $('equity').textContent = c.account ? c.equity.toLocaleString() : '—';
   $('positions').textContent = c.account ? c.positions : '—';
   $('terminal-key').value = c.terminalKey; $('base-url').textContent = location.origin;
-  const pending = current.signals.some(s => ['queued','dispatched','unknown'].includes(s.status));
-  $('send').disabled = !current.online || pending;
-  $('send-note').textContent = !current.online ? 'Connect the EA first.' : pending ? 'Waiting for a result. Inspect MT5 if the outcome is unknown.' : 'This sends an actual instruction to your demo account.';
+  if (!policyDirty) {
+    $('allowed-symbols').value = current.policy.allowedSymbols.join(', ');
+    $('max-lots').value = current.policy.maxLots;
+    $('max-age').value = current.policy.maxAgeSeconds;
+    $('execution-paused').checked = current.policy.paused;
+  }
+  executionState();
   $('signals').replaceChildren();
   for (const s of current.signals) {
     const row = $('signals').insertRow();
@@ -34,8 +50,25 @@ async function refresh() {
     }
   }
   $('empty').hidden = current.signals.length > 0;
-  $('webhook-example').textContent = `POST ${location.origin}/api/webhook/${c.id}\nX-Bridge-Key: ${c.webhookKey}\nContent-Type: application/json\n\n${JSON.stringify({id:'alert-unique-001',action:'buy',symbol:'EURUSD',lots:0.01,slPoints:200,tpPoints:400},null,2)}`;
+  $('webhook-example').textContent = `Webhook URL: ${location.origin}/api/webhook/${c.id}\n\nMessage:\n${JSON.stringify({secret:c.webhookKey,id:'strategy1-{{time}}-{{interval}}-buy',sentAt:'{{timenow}}',action:'buy',symbol:current.policy.allowedSymbols[0] || 'EXACT_MT5_SYMBOL',lots:Math.min(0.01,current.policy.maxLots),slPoints:200,tpPoints:400},null,2)}`;
+  $('receipts').replaceChildren();
+  for (const r of history.receipts) { const row = $('receipts').insertRow(); cell(row,new Date(r.receivedAt).toLocaleString()); cell(row,r.eventId || '—'); cell(row,r.disposition); cell(row,r.detail); }
+  $('events').replaceChildren();
+  for (const e of history.events) { const row = $('events').insertRow(); cell(row,new Date(e.createdAt).toLocaleString()); cell(row,e.kind); cell(row,e.detail); }
 }
+$('policy-form').oninput = () => { policyDirty = true; };
+$('signal-form').oninput = executionState;
+$('policy-form').onsubmit = async event => {
+  event.preventDefault();
+  const policy = {paused:$('execution-paused').checked,allowedSymbols:$('allowed-symbols').value.split(',').map(s=>s.trim()).filter(Boolean),maxLots:Number($('max-lots').value),maxAgeSeconds:Number($('max-age').value)};
+  if (!policy.paused && !confirm('Enable execution? Unexpired queued commands may execute immediately. Check MT5 and your limits first.')) return;
+  try { await api('/api/admin/policy',{method:'POST',body:JSON.stringify(policy)}); policyDirty=false; await refresh(); notify('Execution policy saved.'); } catch(e) { notify(e.message); }
+};
+$('backup').onclick = async () => {
+  $('backup').disabled = true;
+  try { const result=await api('/api/admin/backup',{method:'POST',body:'{}'}); notify(`Database backup created on server: ${result.file}\nIntegrity check: ${result.integrity}`); } catch(e) { notify(e.message); }
+  finally { $('backup').disabled=false; }
+};
 $('login-form').onsubmit = async event => {
   event.preventDefault(); adminKey = $('admin-key').value.trim();
   try {

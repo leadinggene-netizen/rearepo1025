@@ -3,8 +3,10 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
 paths = [
-    'BridgeDemo.csproj', 'global.json', 'NuGet.Config', 'Models.cs', 'StateStore.cs', 'Program.cs',
-    'wwwroot/index.html', 'wwwroot/style.css', 'wwwroot/app.js', 'mt5/RelayDemo.mq5',
+    'BridgeDemo.csproj', 'global.json', 'NuGet.Config', 'packages.lock.json', 'Models.cs', 'StateStore.cs', 'Program.cs', 'BridgeMaintenance.cs',
+    'wwwroot/index.html', 'wwwroot/style.css', 'wwwroot/app.js', 'mt5/RelayDemoRemote.mq5',
+    'deploy/relay.service', 'deploy/relay.nginx.conf', 'deploy/install-release.sh', 'deploy/relay-backup.service', 'deploy/relay-backup.timer',
+    'scripts/db-maintenance.py', 'scripts/package-release.ps1',
     'scripts/run.ps1', 'scripts/test.ps1', 'scripts/check-publish.mjs', 'scripts/prepare-client.ps1', 'scripts/export-file-guide.py',
     'scripts/validation-manifest.mjs', 'tests/integration.mjs', 'tests/pentagi/offline-flow.json',
     'Dockerfile', '.dockerignore', '.gitignore', '.gitattributes',

@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: dotnet restore --configfile NuGet.Config
+      - run: dotnet restore --configfile NuGet.Config --locked-mode
       - run: dotnet build --no-restore --configuration Release --warnaserror
       - run: node --check wwwroot/app.js
       - run: mkdir -p artifacts

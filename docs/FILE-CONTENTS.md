@@ -13,6 +13,7 @@ Paths are relative to the repository root. Generated data, local tools and third
     <DefaultItemExcludes>$(DefaultItemExcludes);.tools/**;data/**;artifacts/**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
     <Content Remove=".tools/**;data/**;artifacts/**;tests/**;mt5/*.ex5;mt5/*.log" />
     <None Remove=".tools/**;data/**;artifacts/**;tests/**;mt5/*.ex5;mt5/*.log" />
   </ItemGroup>
@@ -31,13 +32,73 @@ Paths are relative to the repository root. Generated data, local tools and third
 
 `````text
 <?xml version="1.0" encoding="utf-8"?>
-<configuration><packageSources><clear /></packageSources></configuration>
+<configuration><packageSources><clear /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources></configuration>
 
+`````
+
+## packages.lock.json
+
+`````text
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "Microsoft.Data.Sqlite": {
+        "type": "Direct",
+        "requested": "[10.0.13, )",
+        "resolved": "10.0.13",
+        "contentHash": "w37nz3WFmDtRfXxWEwIXX2OgqDRiwhD1JGbFwfpFCF8GkCrV/yO6Y2JF5058J2RGoI2sCcdn02wrk0yEcekWcw==",
+        "dependencies": {
+          "Microsoft.Data.Sqlite.Core": "10.0.13",
+          "SQLitePCLRaw.bundle_e_sqlite3": "2.1.13",
+          "SQLitePCLRaw.core": "2.1.13"
+        }
+      },
+      "Microsoft.Data.Sqlite.Core": {
+        "type": "Transitive",
+        "resolved": "10.0.13",
+        "contentHash": "Gge8XsSCOwcbkbdmt2UDAe6kIv9Q0vA6yb3wsTStjjexaMFLTWfc/1gH4kbhJ+zWiXRTRA4lG2sOQNVfir204w==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.13"
+        }
+      },
+      "SQLitePCLRaw.bundle_e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "NlDixlC7uHmo+ojXRgkNvN0tQtVGpLDZ3x2OpgNj+G07VHh5cXSszFDrAiC4BpUiPwkcaeuQkMV9WQ123xVtmQ==",
+        "dependencies": {
+          "SQLitePCLRaw.lib.e_sqlite3": "2.1.13",
+          "SQLitePCLRaw.provider.e_sqlite3": "2.1.13"
+        }
+      },
+      "SQLitePCLRaw.core": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "2joofoinuHBFs0nMX3nKuXgxpXryRkCOdM2Ua6HBqQLLy6IW+5f28ZI+HAvMyF8vG7XfNz/lwfBfE6V4juru8Q=="
+      },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "D2UAuiGxFYBqeRXjjjGgvJ5UQifzn6wefmSqeKU7XcNGKLbJRP6X7kcPZ6opOBJGdCIlgbSxTvDpBbLvsN594A=="
+      },
+      "SQLitePCLRaw.provider.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "ZU60dSqoSNRe49KcQDUmOVgdRtjITOssVXFtiISs+zJXDI4D2Sndwpn2NOtzDQNPu0ZAvpoLPQ+GLKv6iEZn8Q==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.13"
+        }
+      }
+    }
+  }
+}
 `````
 
 ## Models.cs
 
 `````text
+using System.Text.Json.Serialization;
+
 namespace BridgeDemo;
 
 public sealed class BridgeState
@@ -45,6 +106,9 @@ public sealed class BridgeState
     public string AdminKey { get; set; } = Guid.NewGuid().ToString("N");
     public Connection Connection { get; set; } = new();
     public List<Signal> Signals { get; set; } = [];
+    public ExecutionPolicy Policy { get; set; } = new();
+    [JsonIgnore] public List<Receipt> PendingReceipts { get; set; } = [];
+    [JsonIgnore] public List<AuditEvent> PendingEvents { get; set; } = [];
 }
 
 public sealed record Connection
@@ -69,6 +133,8 @@ public sealed record Signal
     public double SlPoints { get; set; }
     public double TpPoints { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset ExpiresAt { get; set; } = DateTimeOffset.UtcNow.AddSeconds(30);
+    public DateTimeOffset? SentAt { get; set; }
     public DateTimeOffset? DispatchedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public string Status { get; set; } = "queued";
@@ -77,8 +143,20 @@ public sealed record Signal
 }
 
 public sealed record AlertRequest(string Id, string Action, string Symbol, double Lots = 0.01,
-    double SlPoints = 0, double TpPoints = 0, string? Secret = null);
+    double SlPoints = 0, double TpPoints = 0, string? Secret = null, DateTimeOffset? SentAt = null);
 public sealed record ResultRequest(string Id, string Status, string Ticket, string Detail);
+
+public sealed record ExecutionPolicy
+{
+    public bool Paused { get; set; } = true;
+    public string[] AllowedSymbols { get; set; } = [];
+    public double MaxLots { get; set; } = 0.10;
+    public int MaxAgeSeconds { get; set; } = 30;
+}
+public sealed record Receipt(string Id, DateTimeOffset ReceivedAt, string? EventId,
+    string Disposition, string Detail, object? Payload);
+public sealed record AuditEvent(string Id, DateTimeOffset CreatedAt, string Kind, string Detail, string? EventId = null);
+public sealed class StoreBusyException : Exception { }
 
 `````
 
@@ -86,6 +164,7 @@ public sealed record ResultRequest(string Id, string Status, string Ticket, stri
 
 `````text
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 
 namespace BridgeDemo;
 
@@ -93,69 +172,171 @@ public sealed class StateStore : IDisposable
 {
     readonly object gate = new();
     readonly FileStream lease;
-    readonly string path;
-    readonly JsonSerializerOptions json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    readonly SqliteConnection db;
+    readonly string directory;
+    readonly JsonSerializerOptions json = new(JsonSerializerDefaults.Web);
     BridgeState state;
+    bool faulted;
 
     public StateStore(string directory)
     {
-        Directory.CreateDirectory(directory);
-        lease = new FileStream(Path.Combine(directory, "server.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        path = Path.Combine(directory, "state.json");
-        state = File.Exists(path)
-            ? JsonSerializer.Deserialize<BridgeState>(File.ReadAllText(path), json) ?? throw new InvalidDataException("Empty state")
-            : new BridgeState();
-        // A persisted heartbeat is not evidence that a terminal is connected after restart.
-        state.Connection = DurableConnection(state.Connection);
-        // Never redeliver a possibly executed command after a crash.
-        foreach (var signal in state.Signals.Where(s => s.Status == "dispatched"))
+        this.directory = Path.GetFullPath(directory);
+        Directory.CreateDirectory(this.directory);
+        lease = new FileStream(Path.Combine(this.directory, "server.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        db = new SqliteConnection(new SqliteConnectionStringBuilder {
+            DataSource = Path.Combine(this.directory, "bridge.db"), DefaultTimeout = 1, Pooling = false
+        }.ToString());
+        try
         {
-            signal.Status = "unknown";
-            signal.Detail = "Server restarted after dispatch; inspect MT5 before submitting a new command.";
+            db.Open();
+            Execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;");
+            var version = Convert.ToInt32(Scalar("PRAGMA user_version"));
+            if (version is not (0 or 1)) throw new InvalidDataException("Unsupported database schema; refusing migration.");
+            Execute("""
+                CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), document TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS commands(sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+                    status TEXT NOT NULL, document TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS commands_status ON commands(status,sequence);
+                CREATE TABLE IF NOT EXISTS receipts(sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+                    event_id TEXT, disposition TEXT NOT NULL, document TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS receipts_event ON receipts(event_id);
+                CREATE TABLE IF NOT EXISTS audit(sequence INTEGER PRIMARY KEY AUTOINCREMENT, document TEXT NOT NULL);
+                """);
+            if (Scalar("SELECT document FROM settings WHERE id=1") is not string metadata)
+            {
+                if (version != 0 || Convert.ToInt64(Scalar("SELECT count(*) FROM commands")) != 0)
+                    throw new InvalidDataException("Database settings are missing; refusing to reset credentials or history.");
+                var legacy = Path.Combine(this.directory, "state.json");
+                state = File.Exists(legacy)
+                    ? JsonSerializer.Deserialize<BridgeState>(File.ReadAllText(legacy), json) ?? throw new InvalidDataException("Empty legacy state")
+                    : new BridgeState();
+                state.Policy = new ExecutionPolicy();
+                if (state.AdminKey.Length < 20 || state.Connection.TerminalKey.Length < 20 || state.Connection.WebhookKey.Length < 20 || state.Signals.Select(x => x.Id).Distinct().Count() != state.Signals.Count)
+                    throw new InvalidDataException("Legacy credentials or event identity are invalid; refusing migration.");
+                state.Connection = DurableConnection(state.Connection);
+                foreach (var signal in state.Signals)
+                {
+                    signal.ExpiresAt = signal.CreatedAt.AddSeconds(30);
+                    if (signal.Status == "queued") { signal.Status = "expired"; signal.Detail = "Legacy queue expired during migration; no historical replay."; }
+                    if (signal.Status == "dispatched") { signal.Status = "unknown"; signal.Detail = "Migration after dispatch; inspect MT5."; }
+                }
+                using var tx = db.BeginTransaction();
+                Execute("INSERT INTO settings VALUES(1,$document)", tx, ("$document", Metadata(state)));
+                foreach (var signal in state.Signals) WriteSignal(signal, tx);
+                Execute("PRAGMA user_version=1", tx);
+                tx.Commit();
+            }
+            else state = JsonSerializer.Deserialize<BridgeState>(metadata, json) ?? throw new InvalidDataException("Empty database settings");
+            state.Connection = DurableConnection(state.Connection);
+            state.Signals = QueryDocuments<Signal>("""
+                SELECT document FROM commands WHERE status IN ('queued','dispatched','unknown')
+                OR sequence IN (SELECT sequence FROM commands ORDER BY sequence DESC LIMIT 200) ORDER BY sequence
+                """);
+            Change(s => {
+                foreach (var signal in s.Signals.Where(x => x.Status == "dispatched"))
+                { signal.Status = "unknown"; signal.Detail = "Server restarted after dispatch; inspect MT5 before continuing."; }
+                s.PendingEvents.Add(Event("server_started", "Server started; persisted heartbeats cleared. Unknown execution is never redelivered."));
+                return true;
+            });
         }
-        Save(state);
+        catch { db.Dispose(); lease.Dispose(); throw; }
     }
 
-    void Save(BridgeState value)
+    public static AuditEvent Event(string kind, string detail, string? id = null) => new(Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow, kind, detail, id);
+    static Connection DurableConnection(Connection c) => c with { LastSeen = null, Balance = 0, Equity = 0, Positions = 0 };
+    string Metadata(BridgeState s) => JsonSerializer.Serialize(new { s.AdminKey, Connection = DurableConnection(s.Connection), s.Policy }, json);
+    SqliteCommand Command(string sql, SqliteTransaction? tx = null, params (string, object?)[] parameters)
     {
-        using (var stream = new FileStream(path + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None))
-        {
-            JsonSerializer.Serialize(stream, new BridgeState {
-                AdminKey = value.AdminKey, Connection = DurableConnection(value.Connection), Signals = value.Signals
-            }, json);
-            stream.Flush(true);
-        }
-        File.Move(path + ".tmp", path, true);
+        var command = db.CreateCommand(); command.CommandText = sql; command.Transaction = tx;
+        foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        return command;
     }
+    void Execute(string sql, SqliteTransaction? tx = null, params (string, object?)[] parameters)
+    { using var command = Command(sql, tx, parameters); command.ExecuteNonQuery(); }
+    object? Scalar(string sql, params (string, object?)[] parameters)
+    { using var command = Command(sql, null, parameters); return command.ExecuteScalar(); }
+    List<T> QueryDocuments<T>(string sql)
+    {
+        using var command = Command(sql); using var rows = command.ExecuteReader(); var list = new List<T>();
+        while (rows.Read()) list.Add(JsonSerializer.Deserialize<T>(rows.GetString(0), json) ?? throw new InvalidDataException("Invalid database document"));
+        return list;
+    }
+    void WriteSignal(Signal s, SqliteTransaction tx) => Execute("""
+        INSERT INTO commands(id,status,document) VALUES($id,$status,$document)
+        ON CONFLICT(id) DO UPDATE SET status=excluded.status,document=excluded.document
+        """, tx, ("$id", s.Id), ("$status", s.Status), ("$document", JsonSerializer.Serialize(s, json)));
 
     public T Read<T>(Func<BridgeState, T> read)
     {
-        lock (gate) return read(state);
+        if (!Monitor.TryEnter(gate, 100)) throw new StoreBusyException();
+        try
+        {
+            if (faulted) throw new InvalidDataException("Storage failed; restart after diagnosing the database before further delivery.");
+            return read(state);
+        }
+        finally { Monitor.Exit(gate); }
     }
+    public Signal? FindSignal(string id) => Read(s => {
+        var cached = s.Signals.Find(x => x.Id == id);
+        if (cached is not null) return cached with { };
+        return Scalar("SELECT document FROM commands WHERE id=$id", ("$id", id)) is string text ? JsonSerializer.Deserialize<Signal>(text, json) : null;
+    });
+    public object History() => Read(_ => new {
+        receipts = QueryDocuments<Receipt>("SELECT document FROM receipts ORDER BY sequence DESC LIMIT 100"),
+        events = QueryDocuments<AuditEvent>("SELECT document FROM audit ORDER BY sequence DESC LIMIT 100")
+    });
+    public bool Healthy() => Read(_ => Convert.ToInt32(Scalar("SELECT 1")) == 1);
+    public bool CheckIntegrity() => Read(_ => Scalar("PRAGMA integrity_check") as string == "ok");
 
     public T Change<T>(Func<BridgeState, T> change)
     {
-        lock (gate)
+        if (!Monitor.TryEnter(gate, 100)) throw new StoreBusyException();
+        try
         {
-            // Commit to disk before exposing the changed state or delivering a command.
-            var next = new BridgeState {
-                AdminKey = state.AdminKey, Connection = state.Connection with { },
-                Signals = state.Signals.Select(s => s with { }).ToList()
-            };
+            if (faulted) throw new InvalidDataException("Storage failed; refusing delivery from potentially stale memory.");
+            var next = new BridgeState { AdminKey = state.AdminKey, Connection = state.Connection with { },
+                Policy = state.Policy with { AllowedSymbols = state.Policy.AllowedSymbols.ToArray() },
+                Signals = state.Signals.Select(x => x with { }).ToList() };
             var result = change(next);
-            if (next.AdminKey != state.AdminKey ||
-                DurableConnection(next.Connection) != DurableConnection(state.Connection) ||
-                !next.Signals.SequenceEqual(state.Signals)) Save(next);
+            var metadata = Metadata(next);
+            var metadataChanged = metadata != Metadata(state);
+            var before = state.Signals.ToDictionary(x => x.Id);
+            var changed = next.Signals.Where(x => !before.TryGetValue(x.Id, out var previous) || previous != x).ToArray();
+            if (metadataChanged || changed.Length > 0 || next.PendingReceipts.Count > 0 || next.PendingEvents.Count > 0)
+            {
+                using var tx = db.BeginTransaction();
+                if (metadataChanged) Execute("UPDATE settings SET document=$document WHERE id=1", tx, ("$document", metadata));
+                foreach (var signal in changed) WriteSignal(signal, tx);
+                foreach (var receipt in next.PendingReceipts)
+                    Execute("INSERT INTO receipts(id,event_id,disposition,document) VALUES($id,$event,$disposition,$document)", tx,
+                        ("$id", receipt.Id), ("$event", receipt.EventId), ("$disposition", receipt.Disposition), ("$document", JsonSerializer.Serialize(receipt, json)));
+                foreach (var entry in next.PendingEvents) Execute("INSERT INTO audit(document) VALUES($document)", tx, ("$document", JsonSerializer.Serialize(entry, json)));
+                tx.Commit();
+            }
+            next.PendingReceipts.Clear(); next.PendingEvents.Clear();
+            var recent = next.Signals.TakeLast(200).Select(x => x.Id).ToHashSet();
+            next.Signals = next.Signals.Where(x => recent.Contains(x.Id) || x.Status is "queued" or "dispatched" or "unknown").ToList();
             state = next;
             return result;
         }
+        catch (SqliteException e) when (e.SqliteErrorCode is 10 or 11 or 13 or 26)
+        {
+            faulted = true;
+            throw;
+        }
+        finally { Monitor.Exit(gate); }
     }
 
-    static Connection DurableConnection(Connection value) => value with {
-        LastSeen = null, Balance = 0, Equity = 0, Positions = 0
-    };
-
-    public void Dispose() => lease.Dispose();
+    public object Backup() => Read(_ => {
+        var backups = Path.Combine(directory, "backups"); Directory.CreateDirectory(backups);
+        var file = "relay-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N") + ".db";
+        using var target = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(backups, file), Pooling = false }.ToString());
+        target.Open(); db.BackupDatabase(target);
+        using var check = target.CreateCommand(); check.CommandText = "PRAGMA integrity_check";
+        if (check.ExecuteScalar() as string != "ok") throw new InvalidDataException("Backup integrity check failed");
+        return new { file, integrity = "ok" };
+    });
+    public void Dispose() { db.Dispose(); lease.Dispose(); }
 }
 
 `````
@@ -167,37 +348,61 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using BridgeDemo;
 using Microsoft.AspNetCore.SignalR;
+
+if (args.Length == 1 && args[0] == "--verify-data")
+{
+    using var verified = new StateStore(Environment.GetEnvironmentVariable("BRIDGE_DATA") ?? "data");
+    if (!verified.CheckIntegrity()) throw new InvalidDataException("Database integrity check failed.");
+    Console.WriteLine("Database migration and integrity check passed; no listener started.");
+    return;
+}
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://127.0.0.1:5080");
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 8192);
 builder.Services.AddSignalR();
-builder.Services.AddSingleton(new StateStore(Environment.GetEnvironmentVariable("BRIDGE_DATA") ?? "data"));
+builder.Services.AddSingleton<StateStore>(_ => new StateStore(Environment.GetEnvironmentVariable("BRIDGE_DATA") ?? "data"));
+builder.Services.AddSingleton<BridgeMaintenance>();
+builder.Services.AddHostedService(p => p.GetRequiredService<BridgeMaintenance>());
 var app = builder.Build();
 var store = app.Services.GetRequiredService<StateStore>();
-var hub = app.Services.GetRequiredService<IHubContext<PortalHub>>();
+var maintenance = app.Services.GetRequiredService<BridgeMaintenance>();
+var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 bool Equal(string? supplied, string expected) => CryptographicOperations.FixedTimeEquals(
     SHA256.HashData(Encoding.UTF8.GetBytes(supplied ?? "")), SHA256.HashData(Encoding.UTF8.GetBytes(expected)));
 bool Online(Connection c) => c.LastSeen > DateTimeOffset.UtcNow.AddSeconds(-10);
-Task Changed() => hub.Clients.All.SendAsync("changed");
+Task Changed() { maintenance.Notify(); return Task.CompletedTask; }
 void Sweep(BridgeState s)
 {
-    foreach (var signal in s.Signals.Where(x => x.Status == "queued" && x.CreatedAt < DateTimeOffset.UtcNow.AddSeconds(-30)))
-    { signal.Status = "expired"; signal.Detail = "Not collected within 30 seconds."; }
-    foreach (var signal in s.Signals.Where(x => x.Status == "dispatched" && x.DispatchedAt < DateTimeOffset.UtcNow.AddSeconds(-30)))
-    { signal.Status = "unknown"; signal.Detail = "Result overdue; inspect MT5. Never retry automatically."; }
+    BridgeMaintenance.Sweep(s);
 }
 
 app.Use(async (context, next) =>
 {
-    // This preview is deliberately a loopback service, even if a URL is accidentally changed.
+    try { await next(); }
+    catch (Exception error) when (!context.Response.HasStarted && error is SqliteException or IOException or StoreBusyException)
+    {
+        app.Logger.LogError("Storage operation failed; HTTP 503 returned. Error type: {Type}", error.GetType().Name);
+        context.Response.StatusCode = 503;
+        context.Response.Headers.RetryAfter = "5";
+        await context.Response.WriteAsJsonAsync(new { error = "Storage unavailable or busy; no successful acknowledgement was issued. Retry the same event ID." });
+    }
+});
+
+app.Use(async (context, next) =>
+{
+    // Public deployments must enter through the local HTTPS reverse proxy.
     var ip = context.Connection.RemoteIpAddress;
     if (ip is null || !IPAddress.IsLoopback(ip)) { context.Response.StatusCode = 403; return; }
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["Referrer-Policy"] = "no-referrer";
     var path = context.Request.Path;
+    if (path.StartsWithSegments("/api") || path.StartsWithSegments("/hub"))
+        context.Response.Headers.CacheControl = "no-store";
     string? expected = path.StartsWithSegments("/api/admin") || path.StartsWithSegments("/hub/portal")
         ? store.Read(s => s.AdminKey)
         : path.StartsWithSegments("/api/terminal") ? store.Read(s => s.Connection.TerminalKey) : null;
@@ -217,50 +422,74 @@ app.Use(async (context, next) =>
 });
 app.UseDefaultFiles();
 app.UseStaticFiles();
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/health", () => store.Healthy() ? Results.Ok(new { status = "ok", storage = "sqlite" }) : Results.StatusCode(503));
 app.MapGet("/api/admin/state", () =>
 {
-    var cutoff = DateTimeOffset.UtcNow.AddSeconds(-30);
-    if (store.Read(s => s.Signals.Any(x =>
-        (x.Status == "queued" && x.CreatedAt < cutoff) ||
-        (x.Status == "dispatched" && x.DispatchedAt < cutoff))))
-        store.Change(s => { Sweep(s); return true; });
+    store.Change(s => { Sweep(s); return true; });
     return store.Read(s => Results.Json(new {
         connection = s.Connection,
         online = Online(s.Connection),
+        policy = s.Policy,
+        queue = new { queued = s.Signals.Count(x => x.Status == "queued"), blocked = s.Signals.Any(x => x.Status == "unknown"), capacity = 1000 },
         signals = s.Signals.AsEnumerable().Reverse().Take(200).ToArray()
     }));
 });
 
-app.MapPost("/api/webhook/{connectionId}", async (string connectionId, AlertRequest request, HttpRequest http) =>
+app.MapPost("/api/webhook/{connectionId}", async (string connectionId, HttpRequest http) =>
 {
-    var webhookKey = http.Headers["X-Bridge-Key"].FirstOrDefault() ?? request.Secret;
+    AlertRequest? request = null;
+    string? bodySecret = null;
+    try
+    {
+        using var document = await JsonDocument.ParseAsync(http.Body, cancellationToken: http.HttpContext.RequestAborted);
+        if (document.RootElement.ValueKind == JsonValueKind.Object)
+            foreach (var property in document.RootElement.EnumerateObject())
+                if (property.Name.Equals("secret", StringComparison.OrdinalIgnoreCase) && property.Value.ValueKind == JsonValueKind.String) bodySecret = property.Value.GetString();
+        request = document.RootElement.Deserialize<AlertRequest>(jsonOptions);
+    }
+    catch (JsonException) { }
+    var webhookKey = http.Headers["X-Bridge-Key"].FirstOrDefault() ?? bodySecret;
     if (!Equal(webhookKey, store.Read(s => s.Connection.WebhookKey))) return Results.Unauthorized();
-    if (request.Id is null || !Regex.IsMatch(request.Id, @"\A[A-Za-z0-9_.:-]{1,128}\z") ||
+    var valid = request is not null && !(request.Id is null || !Regex.IsMatch(request.Id, @"\A[A-Za-z0-9_.:-]{1,128}\z") ||
         request.Symbol is null || !Regex.IsMatch(request.Symbol, @"\A[A-Za-z0-9_.-]{1,32}\z") ||
         request.Action is not ("buy" or "sell" or "close") ||
         !double.IsFinite(request.Lots) || request.Lots <= 0 || request.Lots > 1 ||
         !double.IsFinite(request.SlPoints) || !double.IsFinite(request.TpPoints) ||
-        request.SlPoints < 0 || request.TpPoints < 0 || request.SlPoints > 100000 || request.TpPoints > 100000)
-        return Results.BadRequest(new { error = "Invalid id, action, symbol, lots (0..1), or target points." });
+        request.SlPoints < 0 || request.TpPoints < 0 || request.SlPoints > 100000 || request.TpPoints > 100000 ||
+        request.SentAt > DateTimeOffset.UtcNow.AddSeconds(5));
     var result = store.Change<IResult>(s =>
     {
         Sweep(s);
-        if (connectionId != s.Connection.Id) return Results.NotFound();
-        var previous = s.Signals.Find(x => x.Id == request.Id);
+        IResult ReceiptResult(string disposition, int status, string detail, Signal? command = null, bool duplicate = false)
+        {
+            var eventId = request?.Id is { Length: <= 128 } ? request.Id : null;
+            object? payload = valid ? new { request!.Id, request.Action, request.Symbol, request.Lots, request.SlPoints, request.TpPoints, request.SentAt } : null;
+            var receipt = new Receipt(Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow, eventId, disposition, detail, payload);
+            s.PendingReceipts.Add(receipt);
+            s.PendingEvents.Add(StateStore.Event(disposition, detail, eventId));
+            return Results.Json(new { receiptId = receipt.Id, disposition, signal = command, duplicate, detail }, statusCode: status);
+        }
+        if (connectionId != s.Connection.Id) return ReceiptResult("wrong_connection", 404, "Unknown connection.");
+        if (!valid) return ReceiptResult("invalid", 400, "Invalid JSON, id, action, symbol, lot size, targets or producer timestamp.");
+        var alert = request!;
+        var previous = s.Signals.Find(x => x.Id == alert.Id) ?? store.FindSignal(alert.Id!);
         if (previous is not null)
-            return previous.Action == request.Action && previous.Symbol == request.Symbol && previous.Lots == request.Lots &&
-                previous.SlPoints == request.SlPoints && previous.TpPoints == request.TpPoints
-                ? Results.Ok(new { signal = previous, duplicate = true })
-                : Results.Conflict(new { error = "Id already belongs to a different command." });
-        if (!Online(s.Connection)) return Results.Conflict(new { error = "MT5 adapter is offline. Connect your demo terminal first." });
-        if (s.Signals.Any(x => x.Status is "queued" or "dispatched" or "unknown"))
-            return Results.Conflict(new { error = "Resolve the outstanding command before sending another." });
-        if (s.Signals.Count >= 10000) return Results.Conflict(new { error = "Demo journal is full; archive it before continuing." });
-        var signal = new Signal { Id = request.Id, Action = request.Action, Symbol = request.Symbol,
-            Lots = request.Lots, SlPoints = request.SlPoints, TpPoints = request.TpPoints };
+            return previous.Action == alert.Action && previous.Symbol == alert.Symbol && previous.Lots == alert.Lots &&
+                previous.SlPoints == alert.SlPoints && previous.TpPoints == alert.TpPoints && previous.SentAt == alert.SentAt
+                ? ReceiptResult("duplicate", 200, "Existing event; no additional command created.", previous, true)
+                : ReceiptResult("conflict", 409, "Event ID already belongs to different command fields.");
+        if (!s.Policy.AllowedSymbols.Contains(alert.Symbol, StringComparer.Ordinal) || alert.Lots > s.Policy.MaxLots)
+            return ReceiptResult("policy_rejected", 422, "Symbol or lot size is outside the operator's execution policy.");
+        if (s.Signals.Count(x => x.Status == "queued") >= 1000)
+            return ReceiptResult("queue_full", 409, "Pending queue is full; receipt retained without an executable command.");
+        var created = DateTimeOffset.UtcNow;
+        var expiry = (alert.SentAt ?? created).AddSeconds(s.Policy.MaxAgeSeconds);
+        if (expiry > created.AddSeconds(s.Policy.MaxAgeSeconds)) expiry = created.AddSeconds(s.Policy.MaxAgeSeconds);
+        var signal = new Signal { Id = alert.Id!, Action = alert.Action, Symbol = alert.Symbol!,
+            Lots = alert.Lots, SlPoints = alert.SlPoints, TpPoints = alert.TpPoints, CreatedAt = created, ExpiresAt = expiry, SentAt = alert.SentAt };
+        if (expiry <= created) { signal.Status = "expired"; signal.Detail = "Producer event was already stale at receipt."; }
         s.Signals.Add(signal);
-        return Results.Accepted($"/api/admin/state", new { signal, duplicate = false });
+        return ReceiptResult(signal.Status == "expired" ? "expired" : "accepted", 202, "Alert and command committed to the server database.", signal);
     });
     await Changed();
     return result;
@@ -282,9 +511,17 @@ app.MapGet("/api/terminal/poll", async (HttpRequest request) =>
         if (double.TryParse(request.Query["equity"], System.Globalization.CultureInfo.InvariantCulture, out var equity) && double.IsFinite(equity)) c.Equity = equity;
         if (int.TryParse(request.Query["positions"], out var positions) && positions >= 0) c.Positions = positions;
         Sweep(s);
+        if (s.Policy.Paused || s.Signals.Any(x => x.Status is "dispatched" or "unknown")) return Results.NoContent();
+        foreach (var pending in s.Signals.Where(x => x.Status == "queued" &&
+            (!s.Policy.AllowedSymbols.Contains(x.Symbol, StringComparer.Ordinal) || x.Lots > s.Policy.MaxLots)))
+        {
+            pending.Status = "rejected"; pending.Detail = "Execution policy changed before dispatch.";
+            s.PendingEvents.Add(StateStore.Event("policy_rejected", pending.Detail, pending.Id));
+        }
         var next = s.Signals.Find(x => x.Status == "queued");
         if (next is null) return Results.NoContent();
         next.Status = "dispatched"; next.DispatchedAt = DateTimeOffset.UtcNow;
+        s.PendingEvents.Add(StateStore.Event("dispatched", "Command durably dispatched; it will not be delivered again.", next.Id));
         // A small, explicitly versioned wire format avoids a JSON library inside the EA.
         return Results.Text(FormattableString.Invariant($"v1|{next.Id}|{next.Action}|{next.Symbol}|{next.Lots}|{next.SlPoints}|{next.TpPoints}"));
     });
@@ -294,11 +531,11 @@ app.MapGet("/api/terminal/poll", async (HttpRequest request) =>
 
 app.MapPost("/api/terminal/result", async (ResultRequest request) =>
 {
-    if (request.Status is not ("filled" or "closed" or "rejected" or "unknown") || request.Detail?.Length > 500 || request.Ticket?.Length > 40)
+    if (request.Id is null || request.Status is not ("filled" or "closed" or "rejected" or "unknown") || request.Detail is null || request.Ticket is null || request.Detail.Length > 500 || request.Ticket.Length > 40)
         return Results.BadRequest();
     var result = store.Change<IResult>(s =>
     {
-        var signal = s.Signals.Find(x => x.Id == request.Id);
+        var signal = s.Signals.Find(x => x.Id == request.Id) ?? store.FindSignal(request.Id);
         if (signal is null) return Results.NotFound();
         if (signal.Status == "resolved") return Results.Ok(); // An old terminal journal can now be cleared.
         if (signal.Status is not ("dispatched" or "unknown"))
@@ -307,6 +544,7 @@ app.MapPost("/api/terminal/result", async (ResultRequest request) =>
         if ((request.Status == "closed" && signal.Action != "close") || (request.Status == "filled" && signal.Action == "close")) return Results.BadRequest();
         signal.Status = request.Status; signal.Ticket = request.Ticket; signal.Detail = request.Detail;
         signal.CompletedAt = DateTimeOffset.UtcNow;
+        s.PendingEvents.Add(StateStore.Event(request.Status, "Terminal execution result recorded.", signal.Id));
         return Results.Ok();
     });
     await Changed();
@@ -323,17 +561,100 @@ app.MapPost("/api/admin/resolve/{id}", async (string id) =>
         if (signal.Status != "unknown") return Results.Conflict();
         signal.Status = "resolved";
         signal.Detail = "Operator acknowledged after checking broker state. No execution or reversal was requested.";
+        s.PendingEvents.Add(StateStore.Event("resolved", signal.Detail, signal.Id));
         return Results.Ok();
     });
     await Changed();
     return result;
 });
+app.MapGet("/api/admin/receipts", () => Results.Json(store.History()));
+app.MapPost("/api/admin/policy", async (ExecutionPolicy policy) =>
+{
+    if (policy.AllowedSymbols is null || policy.AllowedSymbols.Length > 64 ||
+        policy.AllowedSymbols.Any(x => x is null || !Regex.IsMatch(x, @"\A[A-Za-z0-9_.-]{1,32}\z")) ||
+        !double.IsFinite(policy.MaxLots) || policy.MaxLots <= 0 || policy.MaxLots > 1 || policy.MaxAgeSeconds is < 5 or > 300)
+        return Results.BadRequest(new { error = "Use exact symbols, maximum lots (0..1), and expiry from 5 to 300 seconds." });
+    store.Change(s => {
+        s.Policy = policy with { AllowedSymbols = policy.AllowedSymbols.Distinct(StringComparer.Ordinal).ToArray() };
+        s.PendingEvents.Add(StateStore.Event("policy_changed", policy.Paused ? "Execution paused by operator." : "Execution enabled under the configured symbol/lot policy."));
+        return true;
+    });
+    await Changed();
+    return Results.Ok(new { policy });
+});
+app.MapPost("/api/admin/backup", () => Results.Json(store.Backup()));
 Console.WriteLine("\nBRIDGE DEMO — MT5 demo accounts only");
-Console.WriteLine("Portal: http://127.0.0.1:5080");
-Console.WriteLine("Admin key (paste into portal): " + store.Read(s => s.AdminKey));
+if (app.Environment.IsDevelopment())
+{
+    Console.WriteLine("Portal: http://127.0.0.1:5080");
+    Console.WriteLine("Admin key (paste into portal): " + store.Read(s => s.AdminKey));
+}
+else Console.WriteLine("Credentials are stored in BRIDGE_DATA/bridge.db; retrieve through an authorized server session.");
 app.Run();
 
 public sealed class PortalHub : Hub { }
+
+`````
+
+## BridgeMaintenance.cs
+
+`````text
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Data.Sqlite;
+
+namespace BridgeDemo;
+
+public sealed class BridgeMaintenance(StateStore store, IHubContext<PortalHub> hub, ILogger<BridgeMaintenance> logger) : BackgroundService
+{
+    int dirty;
+    bool wasOnline;
+    public void Notify() => Interlocked.Exchange(ref dirty, 1);
+    public static bool Sweep(BridgeState s)
+    {
+        var changed = false;
+        var now = DateTimeOffset.UtcNow;
+        foreach (var signal in s.Signals.Where(x => x.Status == "queued" && x.ExpiresAt <= now))
+        {
+            signal.Status = "expired"; signal.Detail = "Command expired before dispatch; no execution requested.";
+            s.PendingEvents.Add(StateStore.Event("expired", signal.Detail, signal.Id)); changed = true;
+        }
+        foreach (var signal in s.Signals.Where(x => x.Status == "dispatched" && x.DispatchedAt < now.AddSeconds(-30)))
+        {
+            signal.Status = "unknown"; signal.Detail = "Result overdue; inspect MT5. Never retry automatically.";
+            s.PendingEvents.Add(StateStore.Event("unknown", signal.Detail, signal.Id)); changed = true;
+        }
+        return changed;
+    }
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stoppingToken))
+            {
+                try
+                {
+                    var online = store.Read(s => s.Connection.LastSeen > DateTimeOffset.UtcNow.AddSeconds(-10));
+                    var changed = store.Change(s => {
+                        var swept = Sweep(s);
+                        if (wasOnline && !online) s.PendingEvents.Add(StateStore.Event("terminal_offline", "MT5 heartbeat lost; pending commands keep their original expiry."));
+                        return swept;
+                    });
+                    changed |= online != wasOnline; wasOnline = online;
+                    if (Interlocked.Exchange(ref dirty, 0) == 1 || changed)
+                    {
+                        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                        timeout.CancelAfter(TimeSpan.FromSeconds(2));
+                        await hub.Clients.All.SendAsync("changed", timeout.Token);
+                    }
+                }
+                catch (Exception e) when (e is SqliteException or IOException or StoreBusyException or OperationCanceledException)
+                { logger.LogWarning("Database maintenance or portal notification could not complete; it will be retried."); }
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+    }
+}
 
 `````
 
@@ -344,13 +665,16 @@ public sealed class PortalHub : Hub { }
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Relay / MT5 bridge</title><link rel="stylesheet" href="/style.css"></head>
 <body><aside><a class="brand" href="/">↗ <strong>relay<span>Trading bridge lab</span></strong></a><div class="nav">◉ &nbsp; Workspace</div><div class="aside-note">INDEPENDENT IMPLEMENTATION<br>ASP.NET Core · SignalR · MT5</div><div class="demo-badge">DEMO ACCOUNTS ONLY</div></aside>
 <main><header><div><div class="eyebrow">YOUR EXECUTION WORKSPACE</div><h1>A clear path from alert to order.</h1><p>Connect a demo terminal, send an instruction, and inspect its actual result.</p></div><span id="live" class="pill">Portal locked</span></header>
-<section id="login" class="card login"><h2>Open your local workspace</h2><p>Paste the admin key printed by the server. It stays in this tab’s memory.</p><form id="login-form"><input id="admin-key" type="password" autocomplete="off" placeholder="Admin key" required><button>Connect portal →</button></form></section>
+<section id="login" class="card login"><h2>Open your workspace</h2><p>Paste your admin key. It stays in this tab’s memory.</p><form id="login-form"><input id="admin-key" type="password" autocomplete="off" placeholder="Admin key" required><button>Connect portal →</button></form></section>
 <div id="workspace" hidden><section class="stats"><div class="card"><label>Terminal</label><strong id="terminal-status">Offline</strong><small id="account-label">Awaiting MT5</small></div><div class="card"><label>Balance</label><strong id="balance">—</strong><small>Account currency</small></div><div class="card"><label>Equity</label><strong id="equity">—</strong><small>Reported by your terminal</small></div><div class="card"><label>Open positions</label><strong id="positions">—</strong><small>Whole account count</small></div></section>
-<div class="columns"><section class="card"><div class="eyebrow">01 / CONNECT</div><h2>Your MT5 connection</h2><p>Attach <code>RelayDemo.mq5</code> to one chart on your demo account. Enter your account login and the terminal key below.</p><dl><dt>Bridge URL</dt><dd><code id="base-url"></code></dd><dt>Connection ID</dt><dd><code>demo-mt5</code></dd><dt>Terminal key</dt><dd><input id="terminal-key" type="password" readonly aria-label="Terminal key"><button type="button" id="show-key" class="subtle">Show / hide</button></dd></dl><p class="note">In MT5: Tools → Options → Expert Advisors → allow WebRequest for this URL. Enable Algo Trading. No DLL required.</p></section>
+<section class="card controls"><div class="section-heading"><h2>Execution controls</h2><span id="queue-status" class="pill">Queue empty</span></div><p id="execution-note" role="status"></p><form id="policy-form"><div class="form-grid"><label>Allowed MT5 symbols · comma separated<input id="allowed-symbols" placeholder="btcusd, EURUSD" maxlength="2200"></label><label>Maximum lots<input id="max-lots" type="number" min="0.001" max="1" step="any" required></label><label>Command lifetime · seconds<input id="max-age" type="number" min="5" max="300" step="1" required></label><label class="check-row"><input id="execution-paused" type="checkbox" checked> Pause execution</label></div><button>Save execution policy</button></form><p class="note">Alerts are stored while paused or offline. Commands keep their expiry. Resuming can execute unexpired queued commands; it does not retry unknown outcomes or close positions.</p><button type="button" id="backup" class="subtle">Create database backup</button></section>
+<div class="columns"><section class="card"><div class="eyebrow">01 / CONNECT</div><h2>Your MT5 connection</h2><p>Attach <code>RelayDemoRemote.mq5</code> to one chart on your demo account. Enter your account login and the terminal key below.</p><dl><dt>Bridge URL</dt><dd><code id="base-url"></code></dd><dt>Connection ID</dt><dd><code>demo-mt5</code></dd><dt>Terminal key</dt><dd><input id="terminal-key" type="password" readonly aria-label="Terminal key"><button type="button" id="show-key" class="subtle">Show / hide</button></dd></dl><p class="note">In MT5: Tools → Options → Expert Advisors → allow WebRequest for this URL. Enable Algo Trading. No DLL required.</p></section>
 <section class="card"><div class="eyebrow">02 / SEND</div><h2>Send a demo instruction</h2><p>Symbols must match your broker exactly. SL/TP distances use broker points.</p><form id="signal-form"><div class="form-grid"><label>Action<select id="action"><option value="buy">Buy</option><option value="sell">Sell</option><option value="close">Close own positions</option></select></label><label>Broker symbol<input id="symbol" value="EURUSD" required maxlength="32"></label><label>Lots<input id="lots" type="number" value="0.01" min="0.01" max="1" step="0.01" required></label><label>SL distance · points<input id="sl" type="number" value="200" min="0" max="100000" required></label><label>TP distance · points<input id="tp" type="number" value="400" min="0" max="100000" required></label></div><button id="send" disabled>Send to demo MT5 →</button><small id="send-note">Connect the EA first.</small></form></section></div>
 <section class="card journal"><div class="section-heading"><div><div class="eyebrow">03 / VERIFY</div><h2>Execution journal</h2></div><span class="pill">Receipt ≠ execution</span></div><div class="table-scroll"><table><thead><tr><th>Received</th><th>Request</th><th>Instruction</th><th>Status</th><th>Broker reference / detail</th></tr></thead><tbody id="signals"></tbody></table></div><p id="empty">Your first instruction will appear here. Nothing has been sent yet.</p></section>
-<details class="card"><summary>Webhook integration</summary><p>A unique ID identifies each intended action. Repeating that ID with the same payload returns the existing command.</p><pre id="webhook-example"></pre><p>The webhook key is separate from the portal and terminal keys. This local preview cannot receive TradingView cloud webhooks directly. Read the deployment guide before exposing a service.</p></details></div>
-<div id="message" role="status" aria-live="polite"></div><footer>Relay / independent implementation · Local preview · Verify every broker result</footer></main>
+<details class="card"><summary>TradingView webhook integration</summary><p>A unique ID identifies each intended action. Repeating that ID with the same fields records a duplicate receipt without creating another command. The template below assumes one buy per strategy/bar; use strategy-generated event IDs for multiple events.</p><pre id="webhook-example"></pre><p>Set the HTTPS webhook URL and paste the JSON into TradingView's alert message. Use the broker's exact MT5 symbol. Keep your webhook key private.</p></details>
+<details class="card"><summary>Alert receipts · latest 100</summary><p>Receipt means the alert was recorded; execution is tracked separately above. Secrets are excluded from receipt payloads.</p><div class="table-scroll"><table><thead><tr><th>Received</th><th>Event ID</th><th>Disposition</th><th>Detail</th></tr></thead><tbody id="receipts"></tbody></table></div></details>
+<details class="card"><summary>Activity and warnings · latest 100</summary><div class="table-scroll"><table><thead><tr><th>Time</th><th>Event</th><th>Detail</th></tr></thead><tbody id="events"></tbody></table></div></details></div>
+<div id="message" role="status" aria-live="polite"></div><footer>Relay / independent implementation · Demo accounts only · Verify every broker result</footer></main>
 <script src="/vendor/signalr.min.js"></script><script src="/app.js"></script></body></html>
 
 `````
@@ -359,6 +683,7 @@ public sealed class PortalHub : Hub { }
 
 `````text
 :root{font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#dfe9ee;background:#10191e;font-size:14px;color-scheme:dark}*{box-sizing:border-box}body{margin:0;display:flex}aside{width:230px;position:fixed;inset:0 auto 0 0;border-right:1px solid #2b393f;padding:36px 24px;background:#121f25}.brand{display:flex;gap:12px;font-size:32px;color:#81ddc1;text-decoration:none;align-items:center}.brand strong{font-size:25px;color:#ecf4f6;letter-spacing:-1px}.brand span{display:block;font-size:11px;color:#9dafb6;font-weight:400;letter-spacing:.5px;margin-top:5px}.nav{margin-top:55px;border:1px solid #3e615a;border-radius:9px;padding:14px;background:#213b36;color:#9ce9d0}.aside-note{position:absolute;bottom:100px;font-size:10px;line-height:2;letter-spacing:1px;color:#789098}.demo-badge{position:absolute;bottom:35px;font-size:10px;letter-spacing:1px;color:#e1bf87;border:1px solid #70593d;border-radius:5px;padding:9px}main{margin-left:230px;padding:48px 5%;width:calc(100% - 230px);max-width:1700px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:36px;gap:25px}.eyebrow{font-size:10px;letter-spacing:2px;font-weight:700;color:#88b5ae;margin-bottom:15px}h1{font-size:clamp(25px,3vw,39px);line-height:1.2;letter-spacing:-1.4px;margin:0 0 15px;font-weight:500}p{color:#9bafb8;line-height:1.7;margin:12px 0 22px}h2{font-size:19px;font-weight:500;margin:0 0 12px;letter-spacing:-.3px}.card{background:#18262d;border:1px solid #30434b;border-radius:12px;padding:27px;box-shadow:0 5px 15px #0000000a}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}.stats label{display:block;color:#9bafb8;font-size:12px}.stats strong{display:block;font-size:27px;font-weight:500;margin:15px 0 9px}.stats small{color:#829aa4;font-size:11px}.columns{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px}.pill{font-size:11px;border:1px solid #3c535b;padding:8px 12px;border-radius:20px;color:#9eb9be;white-space:nowrap}.pill.online{color:#99e6c7;border-color:#477764}input,select{padding:12px;background:#112027;border:1px solid #3c525b;color:#dfe9ee;border-radius:6px;font:inherit;width:100%;margin-top:8px}input:focus,select:focus,button:focus-visible{outline:2px solid #84dfbf;outline-offset:2px}button{background:#98e1c6;border:0;color:#142a24;border-radius:6px;padding:13px 18px;font:inherit;font-weight:650;cursor:pointer;margin-top:18px}button:hover{background:#b5f2db}button:disabled{opacity:.4;cursor:not-allowed}.subtle{padding:7px 10px;background:transparent;color:#9cdac5;border:1px solid #3c6057;font-size:11px;margin-top:8px}dt{font-size:11px;color:#8ca1aa;margin-top:18px}dd{margin:7px 0 0}code{font-family:ui-monospace,monospace;font-size:12px;color:#bcded9}.note{border-left:2px solid #5e9e8b;padding-left:15px;font-size:12px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.form-grid label{font-size:11px;color:#9fb5be}#send-note{display:block;color:#8fa5ad;margin-top:12px;font-size:11px}.section-heading{display:flex;justify-content:space-between;align-items:center}.journal{margin-bottom:24px}.table-scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:680px;text-align:left;margin-top:20px}th{color:#8ea8b2;font-size:10px;letter-spacing:.8px;text-transform:uppercase;font-weight:500;padding:14px 8px;border-bottom:1px solid #3a4d55}td{padding:18px 8px;border-bottom:1px solid #2d4049;font-size:12px;vertical-align:top}td:last-child{max-width:320px;overflow-wrap:anywhere}.status{color:#d8bc7e}.status.filled,.status.closed{color:#96e0c2}.status.rejected,.status.unknown{color:#f1a49c}#empty{text-align:center;padding:30px;font-size:12px}details{margin-bottom:20px}summary{cursor:pointer;color:#b6d4d2}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#101e24;padding:18px;font-size:11px;line-height:1.8;border-radius:6px}#message{position:fixed;bottom:25px;right:25px;max-width:430px;white-space:pre-wrap;background:#244b43;color:#d7f6e9;border-radius:8px;padding:16px;display:none;box-shadow:0 5px 30px #0005}footer{font-size:10px;color:#6e8a94;letter-spacing:.6px;padding:16px 0}.login{max-width:600px}.login form{display:flex;align-items:end;gap:12px}.login input{flex:1}.login button{white-space:nowrap}[hidden]{display:none!important}@media(max-width:1050px){aside{width:180px;padding:30px 16px}main{margin-left:180px;width:calc(100% - 180px);padding:30px 24px}.columns{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}@media(max-width:650px){body{display:block}aside{position:static;width:100%;height:82px;padding:18px 22px;border-right:0;border-bottom:1px solid #2b393f}.brand{font-size:25px}.brand strong{font-size:21px}.brand span,.nav,.aside-note,.demo-badge{display:none}main{margin:0;width:100%;padding:27px 17px}header{align-items:start;flex-direction:column;gap:8px}.card{padding:21px}.stats{gap:10px}.stats .card{padding:18px}.stats strong{font-size:23px}.form-grid{gap:12px}.login form{display:block}.login button{width:100%}.section-heading{align-items:start;gap:12px}.section-heading .pill{font-size:9px}#message{left:15px;right:15px;bottom:15px}}
+.controls{margin-bottom:24px}.controls .check-row{display:flex;align-items:center;gap:12px}.controls .check-row input{width:auto;margin:0}#execution-note{color:#d8bc7e}
 
 `````
 
@@ -366,7 +691,7 @@ public sealed class PortalHub : Hub { }
 
 `````text
 const $ = id => document.getElementById(id);
-let adminKey = '', current, connection, noticeTimer;
+let adminKey = '', current, connection, noticeTimer, policyDirty = false, refreshGeneration = 0;
 function notify(text) { $('message').textContent = text; $('message').style.display = 'block'; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => $('message').style.display = 'none', 7000); }
 async function api(path, options = {}, key = adminKey) {
   const response = await fetch(path, { ...options, headers: { 'X-Bridge-Key': key, 'Content-Type': 'application/json', ...options.headers } });
@@ -374,8 +699,20 @@ async function api(path, options = {}, key = adminKey) {
   return response.status === 204 ? null : response.json().catch(() => null);
 }
 function cell(row, text, className) { const td = row.insertCell(); td.textContent = text; if (className) td.className = className; return td; }
+function executionState() {
+  if (!current) return;
+  const p = current.policy, q = current.queue;
+  $('queue-status').textContent = `${q.queued} / ${q.capacity} queued`;
+  $('execution-note').textContent = q.blocked ? 'Execution blocked: inspect the unknown result in MT5 before acknowledging it.' : p.paused ? 'Execution paused. Incoming authenticated alerts are still recorded.' : !current.online ? 'MT5 is offline. Received commands expire at their original deadline.' : 'Execution enabled under your saved symbol and lot limits.';
+  const allowed = p.allowedSymbols.includes($('symbol').value.trim()) && Number($('lots').value) <= p.maxLots;
+  $('send').disabled = !current.online || p.paused || q.blocked || q.queued >= q.capacity || !allowed;
+  $('send-note').textContent = !allowed ? 'Use an allowed symbol and a lot size within the saved policy.' : p.paused ? 'Enable execution in the policy before sending manually.' : q.blocked ? 'Reconcile the unknown result first.' : !current.online ? 'Connect the EA first.' : 'This queues an actual instruction for your demo account.';
+}
 async function refresh() {
-  current = await api('/api/admin/state');
+  const generation = ++refreshGeneration;
+  const [state, history] = await Promise.all([api('/api/admin/state'), api('/api/admin/receipts')]);
+  if (generation !== refreshGeneration) return;
+  current = state;
   const c = current.connection;
   $('terminal-status').textContent = current.online ? 'Connected' : 'Offline';
   $('account-label').textContent = c.account ? `${c.account} / ${c.broker}` : 'Awaiting MT5';
@@ -383,9 +720,13 @@ async function refresh() {
   $('equity').textContent = c.account ? c.equity.toLocaleString() : '—';
   $('positions').textContent = c.account ? c.positions : '—';
   $('terminal-key').value = c.terminalKey; $('base-url').textContent = location.origin;
-  const pending = current.signals.some(s => ['queued','dispatched','unknown'].includes(s.status));
-  $('send').disabled = !current.online || pending;
-  $('send-note').textContent = !current.online ? 'Connect the EA first.' : pending ? 'Waiting for a result. Inspect MT5 if the outcome is unknown.' : 'This sends an actual instruction to your demo account.';
+  if (!policyDirty) {
+    $('allowed-symbols').value = current.policy.allowedSymbols.join(', ');
+    $('max-lots').value = current.policy.maxLots;
+    $('max-age').value = current.policy.maxAgeSeconds;
+    $('execution-paused').checked = current.policy.paused;
+  }
+  executionState();
   $('signals').replaceChildren();
   for (const s of current.signals) {
     const row = $('signals').insertRow();
@@ -401,8 +742,25 @@ async function refresh() {
     }
   }
   $('empty').hidden = current.signals.length > 0;
-  $('webhook-example').textContent = `POST ${location.origin}/api/webhook/${c.id}\nX-Bridge-Key: ${c.webhookKey}\nContent-Type: application/json\n\n${JSON.stringify({id:'alert-unique-001',action:'buy',symbol:'EURUSD',lots:0.01,slPoints:200,tpPoints:400},null,2)}`;
+  $('webhook-example').textContent = `Webhook URL: ${location.origin}/api/webhook/${c.id}\n\nMessage:\n${JSON.stringify({secret:c.webhookKey,id:'strategy1-{{time}}-{{interval}}-buy',sentAt:'{{timenow}}',action:'buy',symbol:current.policy.allowedSymbols[0] || 'EXACT_MT5_SYMBOL',lots:Math.min(0.01,current.policy.maxLots),slPoints:200,tpPoints:400},null,2)}`;
+  $('receipts').replaceChildren();
+  for (const r of history.receipts) { const row = $('receipts').insertRow(); cell(row,new Date(r.receivedAt).toLocaleString()); cell(row,r.eventId || '—'); cell(row,r.disposition); cell(row,r.detail); }
+  $('events').replaceChildren();
+  for (const e of history.events) { const row = $('events').insertRow(); cell(row,new Date(e.createdAt).toLocaleString()); cell(row,e.kind); cell(row,e.detail); }
 }
+$('policy-form').oninput = () => { policyDirty = true; };
+$('signal-form').oninput = executionState;
+$('policy-form').onsubmit = async event => {
+  event.preventDefault();
+  const policy = {paused:$('execution-paused').checked,allowedSymbols:$('allowed-symbols').value.split(',').map(s=>s.trim()).filter(Boolean),maxLots:Number($('max-lots').value),maxAgeSeconds:Number($('max-age').value)};
+  if (!policy.paused && !confirm('Enable execution? Unexpired queued commands may execute immediately. Check MT5 and your limits first.')) return;
+  try { await api('/api/admin/policy',{method:'POST',body:JSON.stringify(policy)}); policyDirty=false; await refresh(); notify('Execution policy saved.'); } catch(e) { notify(e.message); }
+};
+$('backup').onclick = async () => {
+  $('backup').disabled = true;
+  try { const result=await api('/api/admin/backup',{method:'POST',body:'{}'}); notify(`Database backup created on server: ${result.file}\nIntegrity check: ${result.integrity}`); } catch(e) { notify(e.message); }
+  finally { $('backup').disabled=false; }
+};
 $('login-form').onsubmit = async event => {
   event.preventDefault(); adminKey = $('admin-key').value.trim();
   try {
@@ -429,15 +787,15 @@ $('signal-form').onsubmit = async event => {
 
 `````
 
-## mt5/RelayDemo.mq5
+## mt5/RelayDemoRemote.mq5
 
 `````text
 #property strict
-#property version "1.000"
-#property description "Independent local alert bridge. DEMO accounts only."
+#property version "1.100"
+#property description "Independent HTTPS alert bridge. DEMO accounts only."
 #include <Trade/Trade.mqh>
 
-input string BridgeUrl = "http://127.0.0.1:5080";
+input string BridgeUrl = "https://relay.tradingviewtometatraders.com";
 input string TerminalKey = "PASTE_TERMINAL_KEY";
 input long ExpectedLogin = 0;
 input ulong MagicNumber = 1025001;
@@ -488,7 +846,7 @@ int Request(string method, string path, string payload, string &response)
    if(payload != "") { StringToCharArray(payload, data, 0, WHOLE_ARRAY, CP_UTF8); ArrayResize(data, ArraySize(data)-1); }
    ResetLastError();
    int code = WebRequest(method, BridgeUrl + path,
-      "Content-Type: application/json\r\nX-Bridge-Key: " + TerminalKey + "\r\n", 1500, data, result, headers);
+      "Content-Type: application/json\r\nX-Bridge-Key: " + TerminalKey + "\r\n", 5000, data, result, headers);
    response = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
    if(code == -1) Print("Relay WebRequest failed: ", GetLastError(), ". Check the allowed URL and server.");
    return code;
@@ -589,11 +947,12 @@ int OnInit()
 {
    if(ExpectedLogin <= 0 || !AccountAllowed()) { Print("Relay requires the explicitly selected DEMO login."); return INIT_PARAMETERS_INCORRECT; }
    if(TerminalKey == "PASTE_TERMINAL_KEY" || StringLen(TerminalKey) < 20 || MaxLots <= 0 || MaxLots > 1 || MagicNumber == 0) return INIT_PARAMETERS_INCORRECT;
-   if(BridgeUrl != "http://127.0.0.1:5080") { Print("This adapter build permits only the local demo server URL."); return INIT_PARAMETERS_INCORRECT; }
+   if(BridgeUrl != "http://127.0.0.1:5080" && BridgeUrl != "https://relay.tradingviewtometatraders.com")
+   { Print("Use the Relay HTTPS deployment or the local demo server URL, without a trailing slash."); return INIT_PARAMETERS_INCORRECT; }
    journal = StringFormat("relay-demo-%I64d-%I64u.json", ExpectedLogin, MagicNumber);
    trade.SetExpertMagicNumber(MagicNumber); trade.SetDeviationInPoints(DeviationPoints); trade.SetAsyncMode(false);
    EventSetTimer(1);
-   Print("Relay connected locally. No live accounts supported. Keep this EA on only one chart.");
+   Print("Relay endpoint configured: ", BridgeUrl, ". No live accounts supported. Keep only one Relay EA attached.");
    return INIT_SUCCEEDED;
 }
 
@@ -616,6 +975,332 @@ void OnTimer()
 
 `````
 
+## deploy/relay.service
+
+`````text
+[Unit]
+Description=Relay demo-account trading bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=relay
+Group=relay
+WorkingDirectory=/opt/relay/current
+ExecStart=/usr/bin/dotnet /opt/relay/current/BridgeDemo.dll
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5080
+Environment=BRIDGE_DATA=/var/lib/relay
+Environment=AllowedHosts=relay.tradingviewtometatraders.com;127.0.0.1;localhost
+Environment=Logging__LogLevel__Default=Warning
+Environment=Logging__LogLevel__Microsoft=Warning
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+StateDirectory=relay
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+MemoryMax=768M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target
+
+`````
+
+## deploy/relay.nginx.conf
+
+`````text
+# Installed under /etc/nginx/conf.d; all variables are native Nginx variables.
+map $http_upgrade $relay_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+map $http_origin $relay_origin_allowed {
+    default 0;
+    '' 1;
+    'https://relay.tradingviewtometatraders.com' 1;
+}
+limit_req_zone $binary_remote_addr zone=relay_requests:10m rate=10r/s;
+limit_conn_zone $binary_remote_addr zone=relay_connections:10m;
+# Exclude query strings (SignalR tokens and terminal telemetry), headers and bodies.
+log_format relay_safe '$remote_addr $time_iso8601 $request_method $uri $status $request_time';
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+server {
+    listen 80;
+    listen [::]:80;
+    server_name relay.tradingviewtometatraders.com;
+    access_log /var/log/nginx/relay-access.log relay_safe;
+    location ^~ /.well-known/acme-challenge/ { root /var/lib/letsencrypt; }
+    location / { return 308 https://relay.tradingviewtometatraders.com$request_uri; }
+}
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+    return 444;
+}
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name relay.tradingviewtometatraders.com;
+    ssl_certificate /etc/letsencrypt/live/relay.tradingviewtometatraders.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/relay.tradingviewtometatraders.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:relay_tls:10m;
+    ssl_session_tickets off;
+    server_tokens off;
+    access_log /var/log/nginx/relay-access.log relay_safe;
+    # Nginx error records can include query strings; routine request errors stay out.
+    error_log /var/log/nginx/relay-error.log crit;
+    client_max_body_size 8k;
+    client_body_timeout 10s;
+    client_header_timeout 10s;
+    limit_req zone=relay_requests burst=30 nodelay;
+    limit_req_status 429;
+    limit_conn relay_connections 32;
+    limit_conn_status 429;
+    if ($relay_origin_allowed = 0) { return 403; }
+    add_header Strict-Transport-Security 'max-age=31536000' always;
+    add_header X-Frame-Options DENY always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://relay.tradingviewtometatraders.com; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" always;
+    location / {
+        proxy_pass http://127.0.0.1:5080;
+        proxy_http_version 1.1;
+        proxy_set_header Host relay.tradingviewtometatraders.com;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $relay_connection_upgrade;
+        # The application keeps its direct-peer loopback boundary. It does not trust forwarded IP headers.
+        proxy_set_header X-Forwarded-For '';
+        proxy_set_header X-Forwarded-Proto '';
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 75s;
+        proxy_buffering off;
+    }
+}
+
+`````
+
+## deploy/install-release.sh
+
+`````text
+#!/usr/bin/env bash
+# Run as root on the VPS after runtime/Nginx/TLS bootstrap. No secrets in the archive.
+set -euo pipefail
+if [[ $# != 3 || ! $2 =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$ || ! $3 =~ ^[a-f0-9]{64}$ ]]; then
+  echo 'Usage: install-release.sh ARCHIVE RELEASE_ID EXPECTED_SHA256' >&2
+  exit 2
+fi
+archive=$(realpath "$1")
+release="/opt/relay/releases/$2"
+printf '%s  %s\n' "$3" "$archive" | sha256sum --check --status
+id relay >/dev/null 2>&1 || useradd --system --home-dir /var/lib/relay --shell /usr/sbin/nologin relay
+install -d -m 0755 /opt/relay/releases
+install -d -o relay -g relay -m 0700 /var/lib/relay
+test ! -e "$release"
+install -d -m 0755 "$release"
+tar -xzf "$archive" -C "$release" --no-same-owner
+test -f "$release/BridgeDemo.dll"
+chown -R root:root "$release"
+chmod -R go-w "$release"
+previous=$(readlink -f /opt/relay/current || true)
+if [[ -f /var/lib/relay/bridge.db ]]; then
+  python3 -c 'import json,sys; assert json.load(open(sys.argv[1])).get("storageFormat")=="sqlite-v1", "Refusing a legacy application against a SQLite data directory"' "$release/release.json"
+fi
+install -d -m 0700 /var/backups/relay
+snapshot="/var/backups/relay/pre-$2"
+test ! -e "$snapshot"
+install -d -m 0700 "$snapshot/state" "$snapshot/preflight"
+if systemctl cat relay.service >/dev/null 2>&1; then systemctl stop relay.service; fi
+cp -a /var/lib/relay/. "$snapshot/state/"
+cp -a "$snapshot/state/." "$snapshot/preflight/"
+if ! BRIDGE_DATA="$snapshot/preflight" /usr/bin/dotnet "$release/BridgeDemo.dll" --verify-data; then
+  echo 'Migration preflight failed on an isolated copy; active state was not migrated.' >&2
+  if [[ -n "$previous" ]]; then systemctl start relay.service; fi
+  exit 1
+fi
+install -m 0644 "$release/deploy/relay.service" /etc/systemd/system/relay.service
+ln -s "$release" /opt/relay/current.next
+mv -Tf /opt/relay/current.next /opt/relay/current
+systemctl daemon-reload
+systemctl enable relay.service
+systemctl restart relay.service
+healthy=0
+for attempt in {1..30}; do
+  if curl --fail --silent http://127.0.0.1:5080/health >/dev/null; then healthy=1; break; fi
+  sleep 1
+done
+if [[ $healthy != 1 ]]; then
+  echo 'Release failed health check.' >&2
+  systemctl stop relay.service
+  if [[ -n "$previous" && -d "$previous" ]] && python3 -c 'import json,sys; assert json.load(open(sys.argv[1])).get("storageFormat")=="sqlite-v1"' "$previous/release.json"; then
+    ln -s "$previous" /opt/relay/current.rollback
+    mv -Tf /opt/relay/current.rollback /opt/relay/current
+    systemctl start relay.service
+  fi
+  echo "State retained. Pre-deployment copy: $snapshot/state. Legacy rollback requires an explicit reconciled state restore." >&2
+  exit 1
+fi
+install -d -m 0700 /opt/relay/config-backups
+cp /etc/nginx/conf.d/relay.conf "/opt/relay/config-backups/$2.nginx.conf"
+install -m 0644 "$release/deploy/relay.nginx.conf" /etc/nginx/conf.d/relay.conf
+if ! nginx -t; then
+  cp "/opt/relay/config-backups/$2.nginx.conf" /etc/nginx/conf.d/relay.conf
+  echo 'Nginx configuration rejected; previous configuration retained.' >&2
+  exit 1
+fi
+systemctl reload nginx
+install -m 0644 "$release/deploy/relay-backup.service" /etc/systemd/system/relay-backup.service
+install -m 0644 "$release/deploy/relay-backup.timer" /etc/systemd/system/relay-backup.timer
+systemctl daemon-reload
+systemctl enable --now relay-backup.timer
+echo "Relay release $2 is healthy. Persistent state was retained."
+
+`````
+
+## deploy/relay-backup.service
+
+`````text
+[Unit]
+Description=Create and integrity-check a private Relay database backup
+After=relay.service
+
+[Service]
+Type=oneshot
+User=relay
+Group=relay
+UMask=0077
+ExecCondition=/usr/bin/test -f /var/lib/relay/bridge.db
+ExecStart=/usr/bin/python3 /opt/relay/current/scripts/db-maintenance.py backup /var/lib/relay/bridge.db /var/lib/relay/backups
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/relay
+
+`````
+
+## deploy/relay-backup.timer
+
+`````text
+[Unit]
+Description=Daily Relay database backup
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
+`````
+
+## scripts/db-maintenance.py
+
+`````text
+"""Consistent SQLite backup, integrity check, and restore into an empty directory."""
+import datetime
+import json
+import os
+import pathlib
+import sqlite3
+import sys
+import uuid
+
+os.umask(0o077)
+if len(sys.argv) != 4 or sys.argv[1] not in ('backup', 'restore'):
+    raise SystemExit('Usage: db-maintenance.py backup DATABASE BACKUP_DIRECTORY | restore BACKUP EMPTY_DATA_DIRECTORY')
+action = sys.argv[1]
+source = pathlib.Path(sys.argv[2]).resolve(strict=True)
+destination = pathlib.Path(sys.argv[3]).resolve()
+if action == 'restore' and destination.exists() and any(destination.iterdir()):
+    raise SystemExit('Restore requires an empty data directory; existing data was not modified')
+destination.mkdir(mode=0o700, parents=True, exist_ok=True)
+name = 'bridge.db' if action == 'restore' else 'relay-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M%S-') + uuid.uuid4().hex + '.db'
+target = destination / name
+if target.exists():
+    raise SystemExit('Refusing to overwrite an existing database')
+with sqlite3.connect(source.as_uri() + '?mode=ro', uri=True, timeout=1) as original:
+    if original.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+        raise SystemExit('Source integrity check failed')
+    with sqlite3.connect(target, timeout=1) as restored:
+        original.backup(restored)
+        if action == 'restore':
+            metadata = json.loads(restored.execute('SELECT document FROM settings WHERE id=1').fetchone()[0])
+            metadata['policy']['paused'] = True
+            restored.execute('UPDATE settings SET document=? WHERE id=1', (json.dumps(metadata),))
+            for event_id, status, document in restored.execute("SELECT id,status,document FROM commands WHERE status IN ('queued','dispatched')").fetchall():
+                signal = json.loads(document)
+                signal['status'] = 'expired' if status == 'queued' else 'unknown'
+                signal['detail'] = 'Restored backup: no historical replay; reconcile uncertain results in MT5.'
+                restored.execute('UPDATE commands SET status=?,document=? WHERE id=?', (signal['status'], json.dumps(signal), event_id))
+            entry = {'id': uuid.uuid4().hex, 'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'kind': 'backup_restored', 'detail': 'Execution paused; restored queued commands expired and dispatched commands marked unknown.'}
+            restored.execute('INSERT INTO audit(document) VALUES(?)', (json.dumps(entry),))
+            restored.commit()
+        if restored.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+            raise SystemExit('Backup/restore integrity check failed')
+        restored.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+print(json.dumps({'action': action, 'file': str(target), 'integrity': 'ok', 'executionPausedOnRestore': action == 'restore'}))
+
+`````
+
+## scripts/package-release.ps1
+
+`````text
+param([string]$ReleaseId = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss'))
+$ErrorActionPreference = 'Stop'
+if ($ReleaseId -notmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,99}\z') { throw 'Invalid release ID' }
+Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
+$localSdk = Join-Path (Get-Location) '.tools/dotnet/dotnet.exe'
+$sdk = if (Test-Path -LiteralPath $localSdk) { $localSdk } else { 'dotnet' }
+$env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+$env:DOTNET_CLI_HOME = Join-Path (Get-Location) '.tools/home'
+$env:APPDATA = Join-Path (Get-Location) '.tools/appdata'
+$env:NUGET_PACKAGES = Join-Path (Get-Location) '.tools/nuget'
+$directory = Join-Path (Get-Location) "artifacts/releases/$ReleaseId"
+if (Test-Path -LiteralPath $directory) { throw 'Release directory already exists' }
+$app = Join-Path $directory 'app'
+New-Item -ItemType Directory -Path $app -Force | Out-Null
+& $sdk restore --configfile NuGet.Config --locked-mode
+if ($LASTEXITCODE -ne 0) { throw 'Restore failed' }
+& $sdk publish --configuration Release --no-restore --output $app
+if ($LASTEXITCODE -ne 0) { throw 'Publish failed' }
+node scripts/check-publish.mjs $app
+if ($LASTEXITCODE -ne 0) { throw 'Publish boundary check failed' }
+Copy-Item -LiteralPath deploy -Destination $app -Recurse
+New-Item -ItemType Directory -Path (Join-Path $app 'scripts') -Force | Out-Null
+Copy-Item -LiteralPath scripts/db-maintenance.py -Destination (Join-Path $app 'scripts')
+$metadata = @{ releaseId=$ReleaseId; storageFormat='sqlite-v1'; sourceRevision=(git rev-parse HEAD); workingTreeDirty=[bool](git status --porcelain); createdAtUtc=(Get-Date).ToUniversalTime().ToString('o') }
+$metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $app 'release.json') -Encoding utf8NoBOM
+$archive = Join-Path $directory "relay-$ReleaseId.tar.gz"
+tar -czf $archive -C $app .
+if ($LASTEXITCODE -ne 0) { throw 'Archive creation failed' }
+$sha = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+"$sha  relay-$ReleaseId.tar.gz" | Set-Content -LiteralPath "$archive.sha256" -Encoding ascii
+Write-Output "Release: $ReleaseId"
+Write-Output "Archive: $archive"
+Write-Output "SHA256: $sha"
+
+`````
+
 ## scripts/run.ps1
 
 `````text
@@ -626,6 +1311,7 @@ Set-Location -LiteralPath $projectDirectory
 $localDotnet = Join-Path $projectDirectory '.tools/dotnet/dotnet.exe'
 $dotnetCommand = if (Test-Path -LiteralPath $localDotnet) { $localDotnet } else { 'dotnet' }
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+$env:ASPNETCORE_ENVIRONMENT = 'Development'
 $env:DOTNET_CLI_HOME = Join-Path $projectDirectory '.tools/home'
 $env:APPDATA = Join-Path $projectDirectory '.tools/appdata'
 New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
@@ -633,7 +1319,7 @@ $env:NUGET_PACKAGES = Join-Path $projectDirectory '.tools/nuget'
 $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 if (-not (Test-Path -LiteralPath 'wwwroot/vendor/signalr.min.js')) { & "$PSScriptRoot/prepare-client.ps1" }
 if (-not $NoBuild) {
-    & $dotnetCommand restore --configfile NuGet.Config
+    & $dotnetCommand restore --configfile NuGet.Config --locked-mode
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & $dotnetCommand build --no-restore
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -658,7 +1344,7 @@ $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:BRIDGE_DLL = Join-Path $projectDirectory 'artifacts/test-bin/BridgeDemo.dll'
 New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
-& $env:DOTNET_EXE restore --configfile NuGet.Config
+& $env:DOTNET_EXE restore --configfile NuGet.Config --locked-mode
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $env:DOTNET_EXE build --no-restore --warnaserror --output artifacts/test-bin
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -681,7 +1367,7 @@ const root = path.resolve(process.argv[2] || 'artifacts/publish');
 const excluded = new Set(['data','.tools','artifacts','tests','.git','mt5']);
 async function inspect(directory) {
   for(const entry of await readdir(directory,{withFileTypes:true})) {
-    if(excluded.has(entry.name.toLowerCase()) || ['state.json','server.lock'].includes(entry.name.toLowerCase()))
+    if(excluded.has(entry.name.toLowerCase()) || ['state.json','server.lock'].includes(entry.name.toLowerCase()) || /\.(db|sqlite)(-wal|-shm)?$/i.test(entry.name))
       throw new Error(`Local-only content leaked into publish output: ${path.relative(root,path.join(directory,entry.name))}`);
     if(entry.isDirectory()) await inspect(path.join(directory,entry.name));
   }
@@ -712,8 +1398,10 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
 paths = [
-    'BridgeDemo.csproj', 'global.json', 'NuGet.Config', 'Models.cs', 'StateStore.cs', 'Program.cs',
-    'wwwroot/index.html', 'wwwroot/style.css', 'wwwroot/app.js', 'mt5/RelayDemo.mq5',
+    'BridgeDemo.csproj', 'global.json', 'NuGet.Config', 'packages.lock.json', 'Models.cs', 'StateStore.cs', 'Program.cs', 'BridgeMaintenance.cs',
+    'wwwroot/index.html', 'wwwroot/style.css', 'wwwroot/app.js', 'mt5/RelayDemoRemote.mq5',
+    'deploy/relay.service', 'deploy/relay.nginx.conf', 'deploy/install-release.sh', 'deploy/relay-backup.service', 'deploy/relay-backup.timer',
+    'scripts/db-maintenance.py', 'scripts/package-release.ps1',
     'scripts/run.ps1', 'scripts/test.ps1', 'scripts/check-publish.mjs', 'scripts/prepare-client.ps1', 'scripts/export-file-guide.py',
     'scripts/validation-manifest.mjs', 'tests/integration.mjs', 'tests/pentagi/offline-flow.json',
     'Dockerfile', '.dockerignore', '.gitignore', '.gitattributes',
@@ -734,7 +1422,7 @@ import {createHash} from 'node:crypto';
 import {readFile,mkdir,writeFile} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 
-const files=['BridgeDemo.csproj','global.json','NuGet.Config','Program.cs','StateStore.cs','Models.cs','mt5/RelayDemo.mq5','tests/integration.mjs','tests/pentagi/offline-flow.json','.github/workflows/ci.yml'];
+const files=['BridgeDemo.csproj','packages.lock.json','global.json','NuGet.Config','Program.cs','StateStore.cs','Models.cs','BridgeMaintenance.cs','scripts/db-maintenance.py','mt5/RelayDemoRemote.mq5','deploy/relay.service','deploy/relay.nginx.conf','deploy/install-release.sh','tests/integration.mjs','tests/pentagi/offline-flow.json','.github/workflows/ci.yml'];
 const hashes={};
 for(const file of files) hashes[file]=createHash('sha256').update(await readFile(file)).digest('hex');
 const sourceRevision=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
@@ -750,177 +1438,125 @@ console.log('Validation manifest saved; source hashes and runtime versions only.
 `````text
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, writeFile, stat, utimes, rmdir } from 'node:fs/promises';
-import { once } from 'node:events';
+import {spawn,execFileSync} from 'node:child_process';
+import {mkdtemp,mkdir,writeFile,readFile,copyFile,readdir} from 'node:fs/promises';
+import {once} from 'node:events';
 import net from 'node:net';
 import path from 'node:path';
 
-test('HTTP, SignalR, durable command lifecycle and restart recovery (no broker)', {timeout:45000}, async t => {
-  const artifacts=path.resolve(process.env.BRIDGE_TEST_ARTIFACTS || 'artifacts');
-  await mkdir(artifacts, {recursive:true});
-  const directory = await mkdtemp(path.join(artifacts,'test-'));
-  const listener = net.createServer(); listener.listen(0,'127.0.0.1'); await once(listener,'listening');
-  const port = listener.address().port; await new Promise(resolve => listener.close(resolve));
-  assert.notEqual(port,5080,'tests must never use the MT5-connected preview port');
-  const base = `http://127.0.0.1:${port}`;
-  const dotnet = process.env.DOTNET_EXE || 'dotnet';
-  const dll = process.env.BRIDGE_DLL || path.resolve('bin/Debug/net10.0/BridgeDemo.dll');
-  let server, output = '';
-  async function start() {
-    output = '';
-    server = spawn(dotnet, [dll], {env:{...process.env,BRIDGE_DATA:directory,ASPNETCORE_URLS:base,DOTNET_PROCESSOR_COUNT:'1'},stdio:['ignore','pipe','pipe']});
-    server.stdout.on('data', b => output += b); server.stderr.on('data', b => output += b);
-    server.on('error', e => { output += e.message; });
-    for(let i=0;i<150;i++) {
-      if(server.exitCode !== null) throw new Error(`Server exited: ${output.replace(/\b[0-9a-f]{32}\b/gi,'<TEST-KEY-REDACTED>')}`);
-      try { if((await fetch(`${base}/health`)).ok) return; } catch {}
-      await new Promise(resolve => setTimeout(resolve,100));
-    }
-    throw new Error(`Server not ready: ${output.replace(/\b[0-9a-f]{32}\b/gi,'<TEST-KEY-REDACTED>')}`);
-  }
-  async function stop() { if(server && server.exitCode === null && server.signalCode === null) { const exited = once(server,'exit'); server.kill(); await exited; } }
-  t.after(stop); await start();
-  const statePath = path.join(directory,'state.json');
-  const secrets = JSON.parse(await readFile(statePath,'utf8'));
-  const admin = secrets.adminKey, terminal = secrets.connection.terminalKey, webhook = secrets.connection.webhookKey;
-  function request(route,key,body) { return fetch(base+route,{method:body===undefined?'GET':'POST',headers:{'X-Bridge-Key':key,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)}); }
-  const poll = '/api/terminal/poll?mode=demo&account=12345&broker=Test-Demo&balance=10000&equity=9999&positions=0';
-  const alert = {id:'first-alert',action:'buy',symbol:'EURUSD',lots:0.01,slPoints:200,tpPoints:400};
-  assert.equal((await fetch(base+'/')).status,200);
-  assert.equal((await request('/api/admin/state','wrong')).status,401);
-  assert.equal((await request('/api/admin/state',terminal)).status,401);
-  assert.equal((await request('/hub/portal/negotiate?negotiateVersion=1','wrong',{})).status,401);
-  assert.equal((await request('/api/webhook/demo-mt5',webhook,alert)).status,409,'offline terminal blocks stale orders');
+test('transactional alert receipts, ordered demo delivery and recovery (no broker)',{timeout:90000},async t=>{
+ const root=path.resolve(process.env.BRIDGE_TEST_ARTIFACTS||'artifacts'); await mkdir(root,{recursive:true});
+ let directory=await mkdtemp(path.join(root,'sqlite-test-'));
+ const original=directory;
+ const legacy={adminKey:'a'.repeat(32),connection:{id:'demo-mt5',terminalKey:'b'.repeat(32),webhookKey:'c'.repeat(32)},signals:[{id:'legacy-filled',action:'buy',symbol:'EURUSD',lots:0.01,status:'filled',createdAt:'2000-01-01T00:00:00Z',ticket:'old-test-deal'},{id:'legacy-queued',action:'buy',symbol:'EURUSD',lots:0.01,status:'queued',createdAt:'2000-01-01T00:00:00Z'},{id:'legacy-dispatched',action:'buy',symbol:'EURUSD',lots:0.01,status:'dispatched',createdAt:'2000-01-01T00:00:00Z'}]};
+ await writeFile(path.join(directory,'state.json'),JSON.stringify(legacy));
+ const listener=net.createServer();listener.listen(0,'127.0.0.1');await once(listener,'listening');const port=listener.address().port;await new Promise(r=>listener.close(r));assert.notEqual(port,5080);
+ const base=`http://127.0.0.1:${port}`, admin=legacy.adminKey, terminal=legacy.connection.terminalKey, webhook=legacy.connection.webhookKey;
+ const python=process.env.PYTHON_EXE||(process.platform==='win32'?'C:/Program Files/Python312/python.exe':'python3');
+ let server,output='';
+ const ingressMs=[];
+ async function start(){
+  output='';server=spawn(process.env.DOTNET_EXE||'dotnet',[process.env.BRIDGE_DLL||path.resolve('bin/Debug/net10.0/BridgeDemo.dll')],{env:{...process.env,BRIDGE_DATA:directory,ASPNETCORE_URLS:base,ASPNETCORE_ENVIRONMENT:'Production',DOTNET_PROCESSOR_COUNT:'1'},stdio:['ignore','pipe','pipe']});
+  server.stdout.on('data',b=>output+=b);server.stderr.on('data',b=>output+=b);
+  for(let i=0;i<150;i++){if(server.exitCode!==null)throw new Error('Test server exited');try{if((await fetch(base+'/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}
+  throw new Error('Test server not ready');
+ }
+ async function stop(){if(server&&server.exitCode===null&&server.signalCode===null){const done=once(server,'exit');server.kill();await done;}}
+ t.after(stop);
+ const request=(route,key,body)=>fetch(base+route,{method:body===undefined?'GET':'POST',headers:{'X-Bridge-Key':key,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+ const snapshot=async()=>{const r=await request('/api/admin/state',admin);assert.equal(r.status,200);return r.json();};
+ const poll='/api/terminal/poll?mode=demo&account=12345&broker=Test-Demo&balance=10000&equity=9999&positions=0';
+ const alert=(id,extra={})=>({id,action:'buy',symbol:'EURUSD',lots:0.01,slPoints:200,tpPoints:400,...extra});
+ const send=(id,extra={})=>request('/api/webhook/demo-mt5',webhook,alert(id,extra));
+ const configure=async(extra={})=>{const r=await request('/api/admin/policy',admin,{paused:false,allowedSymbols:['EURUSD'],maxLots:0.1,maxAgeSeconds:30,...extra});assert.equal(r.status,200);};
+ const finish=async(id,status='filled')=>{const r=await request('/api/terminal/result',terminal,{id,status,ticket:'test-deal',detail:'Protocol fixture; no broker'});assert.equal(r.status,200);};
+ const inspect=(sql)=>JSON.parse(execFileSync(python,['-c','import sqlite3,json,sys; c=sqlite3.connect(sys.argv[1]); print(json.dumps(c.execute(sys.argv[2]).fetchall()))',path.join(directory,'bridge.db'),sql],{encoding:'utf8'}));
+ await start();
+ await t.test('legacy credentials migrate into SQLite with execution paused',async()=>{
+  const state=await snapshot();assert.equal(state.policy.paused,true);assert.deepEqual(state.policy.allowedSymbols,[]);assert.equal(state.connection.terminalKey,terminal);assert.equal(state.online,false);
+  assert.equal(inspect('PRAGMA integrity_check')[0][0],'ok');assert.equal(inspect('PRAGMA user_version')[0][0],1);assert.ok(!output.includes(admin));
+  assert.equal(state.signals.find(s=>s.id==='legacy-filled').ticket,'old-test-deal');assert.equal(state.signals.find(s=>s.id==='legacy-queued').status,'expired');assert.equal(state.signals.find(s=>s.id==='legacy-dispatched').status,'unknown');
+  assert.equal((await request('/api/admin/resolve/legacy-dispatched',admin,{})).status,200);
+  assert.equal((await fetch(base+'/api/admin/state')).status,401);assert.equal((await request(poll,admin)).status,401);
+ });
+ await configure();
+ await t.test('authenticated receipts survive offline delivery, duplicates and rejected input',async()=>{
+  assert.equal((await send('offline-first')).status,202);assert.equal((await send('offline-second')).status,202);
+  assert.equal((await send('offline-first')).status,200);assert.equal((await send('offline-first',{lots:0.02})).status,409);
+  assert.equal((await request('/api/webhook/demo-mt5','wrong',alert('unauthorized'))).status,401);
+  assert.equal((await send('invalid',{symbol:'bad\n'})).status,400);
+  assert.equal((await send('blocked-symbol',{symbol:'OTHER'})).status,422);
+  const body=await (await request('/api/admin/receipts',admin)).json();assert.equal(body.receipts.length,6);assert.ok(!JSON.stringify(body).includes(webhook));
+  const outcomes=body.receipts.map(r=>r.disposition);assert.ok(outcomes.includes('duplicate'));assert.ok(outcomes.includes('conflict'));assert.ok(outcomes.includes('invalid'));
+  const raw=await fetch(base+'/api/webhook/demo-mt5',{method:'POST',headers:{'X-Bridge-Key':webhook,'Content-Type':'application/json'},body:'{"lots":'});assert.equal(raw.status,400);
+  await stop();await start();assert.equal((await send('offline-first')).status,200);
+  const payload=await fetch(base+'/api/webhook/demo-mt5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(alert('json-secret',{secret:webhook}))});assert.equal(payload.status,202);
   assert.equal((await request(poll.replace('mode=demo','mode=live'),terminal)).status,400);
-  assert.equal((await request(poll,terminal)).status,204);
-  await t.test('unchanged dashboard and heartbeat do not rewrite durable state',async()=>{
-    const saved=await readFile(statePath,'utf8');
-    const sentinel=new Date('2000-01-01T00:00:00Z'); await utimes(statePath,sentinel,sentinel);
-    const timestamp=(await stat(statePath)).mtimeMs;
-    await request('/api/admin/state',admin);
-    await request(poll.replace('balance=10000','balance=10001'),terminal);
-    const current=await (await request('/api/admin/state',admin)).json();
-    assert.equal(current.connection.balance,10001,'telemetry is updated in memory');
-    assert.ok((await readFile(statePath,'utf8'))===saved,'read/telemetry must not change durable content');
-    assert.equal((await stat(statePath)).mtimeMs,timestamp,'read/telemetry must not rewrite the file');
-  });
-  await t.test('control characters and oversized identity fields are rejected without enqueueing',async()=>{
-    for(const invalid of ['valid\n','valid\r','valid\r\n','mid\ndle','tab\tvalue','nul\0value']) {
-      assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,id:invalid})).status,400);
-      assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,symbol:invalid})).status,400);
-    }
-    assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,id:'a'.repeat(129)})).status,400);
-    assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,symbol:'a'.repeat(33)})).status,400);
-    assert.equal((await request(poll.replace('12345','12345%0A'),terminal)).status,400);
-    assert.equal((await request(poll,terminal)).status,204,'invalid commands never enter the queue');
-  });
-  await t.test('failed durable save cannot publish a queued command',async()=>{
-    await mkdir(statePath+'.tmp');
-    try {
-      assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,id:'failed-save'})).status,500);
-    } finally { await rmdir(statePath+'.tmp'); }
-    const snapshot=await (await request('/api/admin/state',admin)).json();
-    assert.equal(snapshot.signals.length,0,'failed transaction must not leak into memory');
-    assert.equal((await request(poll,terminal)).status,204,'failed command must never be delivered');
-  });
-  assert.equal((await request(poll.replace('12345','99999'),terminal)).status,409,'account identity is bound');
-  assert.equal((await request('/api/webhook/demo-mt5',terminal,alert)).status,401);
-  assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,lots:50})).status,400);
-
-  const negotiation = await (await fetch(base+'/hub/portal/negotiate?negotiateVersion=1', {method:'POST',headers:{Authorization:`Bearer ${admin}`}})).json();
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/hub/portal?id=${encodeURIComponent(negotiation.connectionToken)}&access_token=${admin}`);
-  t.after(() => ws.close());
-  await once(ws,'open');
-  const messages=[]; ws.addEventListener('message', e => messages.push(e.data));
-  ws.send(JSON.stringify({protocol:'json',version:1})+'\x1e');
-  for(let i=0;i<30 && !messages.length;i++) await new Promise(resolve=>setTimeout(resolve,50));
-  assert.ok(messages.some(m=>m.includes('{}')),'SignalR handshake completed');
-  assert.equal((await request('/api/webhook/demo-mt5',webhook,alert)).status,202);
-  assert.equal((await fetch(base+'/api/webhook/demo-mt5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...alert,secret:webhook})})).status,200,'TradingView-compatible JSON secret');
-  assert.equal((await request('/api/webhook/demo-mt5',webhook,alert)).status,200,'same ID is idempotent');
-  assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,lots:0.02})).status,409);
-  const simultaneous = await Promise.all([request(poll,terminal),request(poll,terminal)]);
-  assert.deepEqual(simultaneous.map(x=>x.status).sort(),[200,204],'only one poll receives the command');
-  const wire = await simultaneous.find(x=>x.status===200).text();
-  assert.equal(wire,'v1|first-alert|buy|EURUSD|0.01|200|400');
-  assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,id:'blocked'})).status,409);
-  const result = {id:alert.id,status:'filled',ticket:'test-deal-01',detail:'Protocol test only; no broker execution'};
-  assert.equal((await request('/api/terminal/result',webhook,result)).status,401);
-  assert.equal((await request('/api/terminal/result',terminal,result)).status,200);
-  assert.equal((await request('/api/terminal/result',terminal,result)).status,200,'result retries are idempotent');
-  assert.equal((await request('/api/terminal/result',terminal,{...result,status:'closed'})).status,409);
-  await t.test('maximum-length identity and JSON result strings round-trip exactly',async()=>{
-    const boundary={...alert,id:'a'.repeat(128),symbol:'s'.repeat(32)};
-    assert.equal((await request('/api/webhook/demo-mt5',webhook,boundary)).status,202);
-    const persisted=JSON.parse(await readFile(statePath,'utf8'));
-    assert.equal(persisted.signals.at(-1).status,'queued','acceptance is durable');
-    assert.equal(await (await request(poll,terminal)).text(),`v1|${boundary.id}|buy|${boundary.symbol}|0.01|200|400`);
-    const dispatched=JSON.parse(await readFile(statePath,'utf8'));
-    assert.equal(dispatched.signals.at(-1).status,'dispatched','dispatch is durable before delivery');
-    const detail='quote " slash \\ controls \n\r\t\b\f\u0001 unicode €';
-    assert.equal((await request('/api/terminal/result',terminal,{id:boundary.id,status:'rejected',ticket:'',detail})).status,200);
-    const snapshot=await (await request('/api/admin/state',admin)).json();
-    assert.equal(snapshot.signals[0].id,boundary.id);
-    assert.equal(snapshot.signals[0].symbol,boundary.symbol);
-    assert.equal(snapshot.signals[0].detail,detail);
-  });
-  const dashboard = await (await request('/api/admin/state',admin)).json();
-  assert.equal(dashboard.signals.find(s=>s.id===alert.id).status,'filled'); assert.equal(dashboard.connection.equity,9999);
-  for(let i=0;i<20&&!messages.some(m=>m.includes('changed'));i++) await new Promise(resolve=>setTimeout(resolve,50));
-  assert.ok(messages.some(m=>m.includes('changed')),'SignalR broadcasts actual state changes');
-  ws.close();
-
-  const second = {...alert,id:'interrupted'};
-  assert.equal((await request('/api/webhook/demo-mt5',webhook,second)).status,202);
-  assert.equal((await request(poll,terminal)).status,200);
-  await stop(); await start();
-  const recovered = await (await request('/api/admin/state',admin)).json();
-  assert.equal(recovered.online,false,'restart requires a fresh heartbeat');
-  assert.equal(recovered.connection.lastSeen,null,'stale persisted telemetry is discarded');
-  assert.equal(recovered.signals[0].status,'unknown','restart does not redeliver an uncertain trade');
-  assert.equal((await request(poll,terminal)).status,204);
-  assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,id:'blocked-after-restart'})).status,409);
-  assert.equal((await request('/api/admin/resolve/interrupted',admin,{})).status,200);
-  assert.equal((await request('/api/terminal/result',terminal,{...result,id:'interrupted',status:'unknown'})).status,200,'acknowledged terminal journal can clear');
-  assert.equal((await request('/api/webhook/demo-mt5',webhook,{...alert,id:'expires'})).status,202);
-  await stop();
-  const saved=JSON.parse(await readFile(statePath,'utf8')); saved.signals.find(s=>s.id==='expires').createdAt='2000-01-01T00:00:00Z';
-  await writeFile(statePath,JSON.stringify(saved)); await start();
-  const expired=await (await request('/api/admin/state',admin)).json();
-  assert.equal(expired.signals[0].status,'expired');
-  const expiredOnDisk=JSON.parse(await readFile(statePath,'utf8'));
-  assert.equal(expiredOnDisk.signals.find(s=>s.id==='expires').status,'expired','dashboard maintenance persists actual transitions');
-  assert.equal((await request(poll,terminal)).status,204);
-  await t.test('large histories retain command safety without read or heartbeat writes',async()=>{
-    const measurements=[];
-    for(const count of [0,1000,9999]) {
-      await stop();
-      const fixture=JSON.parse(await readFile(statePath,'utf8'));
-      fixture.signals=Array.from({length:count},(_,i)=>({...alert,id:`fixture-${i}`,status:'rejected',createdAt:'2000-01-01T00:00:00Z'}));
-      await writeFile(statePath,JSON.stringify(fixture)); await start();
-      const sentinel=new Date('2000-01-01T00:00:00Z'); await utimes(statePath,sentinel,sentinel);
-      const stamp=(await stat(statePath)).mtimeMs;
-      const times=[];
-      for(let i=0;i<5;i++) {
-        const begin=performance.now();const response=await request('/api/admin/state',admin);
-        assert.equal(response.status,200);const data=await response.json();
-        times.push(performance.now()-begin);assert.equal(data.signals.length,Math.min(count,200));
-        await new Promise(resolve=>setTimeout(resolve,350));
-      }
-      assert.equal((await request(poll,terminal)).status,204);
-      assert.equal((await stat(statePath)).mtimeMs,stamp,'history reads and heartbeat must not rewrite the journal');
-      times.sort((a,b)=>a-b);
-      measurements.push({completedRecords:count,medianMs:+times[2].toFixed(2),maxMs:+times[4].toFixed(2),requests:5,concurrency:1,journalRewritten:false});
-    }
-    const accepted={...alert,id:'after-large-history'};
-    assert.equal((await request('/api/webhook/demo-mt5',webhook,accepted)).status,202,'one free journal slot remains');
-    assert.equal((await request(poll,terminal)).status,200);
-    await stop();await start();
-    const snapshot=await (await request('/api/admin/state',admin)).json();
-    assert.equal(snapshot.signals[0].status,'unknown','large histories retain restart safety');
-    await writeFile(path.join(artifacts,'validation-metrics.json'),JSON.stringify({scope:'synthetic loopback only; no broker',measurements},null,2));
-  });
+  const simultaneous=await Promise.all([request(poll,terminal),request(poll,terminal)]);assert.deepEqual(simultaneous.map(r=>r.status).sort(),[200,204]);assert.match(await simultaneous.find(r=>r.status===200).text(),/^v1\|offline-first\|/);
+  assert.equal((await request(poll,terminal)).status,204);await finish('offline-first');
+  assert.match(await (await request(poll,terminal)).text(),/^v1\|offline-second\|/);await finish('offline-second');
+  assert.match(await (await request(poll,terminal)).text(),/^v1\|json-secret\|/);await finish('json-secret');
+ });
+ await t.test('paused and stale commands never dispatch, even after restart',async()=>{
+  await configure({paused:true});assert.equal((await send('paused')).status,202);assert.equal((await request(poll,terminal)).status,204);
+  await stop();await start();assert.equal((await snapshot()).policy.paused,true);assert.equal((await request(poll,terminal)).status,204);
+  await configure();assert.match(await (await request(poll,terminal)).text(),/^v1\|paused\|/);await finish('paused');
+  assert.equal((await send('stale',{sentAt:'2000-01-01T00:00:00Z'})).status,202);assert.equal((await request(poll,terminal)).status,204);assert.equal((await snapshot()).signals.find(s=>s.id==='stale').status,'expired');
+  assert.equal((await send('future',{sentAt:'2099-01-01T00:00:00Z'})).status,400);
+  await configure({paused:true});await send('risk-change');await configure({maxLots:0.005});assert.equal((await request(poll,terminal)).status,204);assert.equal((await snapshot()).signals.find(s=>s.id==='risk-change').status,'rejected');await configure();
+  await configure({paused:true,maxAgeSeconds:5});await send('offline-expiry');await new Promise(r=>setTimeout(r,5500));await stop();await start();await configure();assert.equal((await request(poll,terminal)).status,204);assert.equal((await snapshot()).signals.find(s=>s.id==='offline-expiry').status,'expired');
+ });
+ await t.test('identity validation and terminal JSON round-trip remain exact',async()=>{
+  for(const invalid of ['tail\n','tail\r','mid\tvalue','nul\0value']) {
+   assert.equal((await send(invalid)).status,400);assert.equal((await send('invalid-symbol',{symbol:invalid})).status,400);
+  }
+  assert.equal((await send('x'.repeat(129))).status,400);assert.equal((await send('long-symbol',{symbol:'S'.repeat(33)})).status,400);
+  const id='i'.repeat(128), symbol='S'.repeat(32);await configure({allowedSymbols:[symbol]});assert.equal((await send(id,{symbol})).status,202);
+  assert.equal(await (await request(poll,terminal)).text(),`v1|${id}|buy|${symbol}|0.01|200|400`);
+  const detail='quote " slash \\ tab\t line\n return\r nul\0';const result={id,status:'filled',ticket:'ticket-"\\\n',detail};
+  assert.equal((await request('/api/terminal/result',terminal,result)).status,200);assert.equal((await request('/api/terminal/result',terminal,result)).status,200);
+  const saved=(await snapshot()).signals.find(s=>s.id===id);assert.equal(saved.detail,detail);assert.equal(saved.ticket,result.ticket);await configure();
+ });
+ await t.test('dashboard and telemetry do not rewrite the database journal',async()=>{
+  const wal=path.join(directory,'bridge.db-wal');const before=await readFile(wal);
+  for(let i=0;i<5;i++){await snapshot();assert.equal((await request(poll.replace('balance=10000','balance=10001'),terminal)).status,204);}
+  assert.deepEqual(await readFile(wal),before);assert.equal((await snapshot()).connection.balance,10001);
+ });
+ await t.test('dispatched commands become unknown on restart and block the FIFO queue',async()=>{
+  await send('interrupted');await send('after-unknown');assert.equal((await request(poll,terminal)).status,200);await stop();await start();
+  assert.equal((await snapshot()).signals.find(s=>s.id==='interrupted').status,'unknown');assert.equal((await request(poll,terminal)).status,204);
+  assert.equal((await request('/api/admin/resolve/interrupted',admin,{})).status,200);assert.match(await (await request(poll,terminal)).text(),/^v1\|after-unknown\|/);await finish('after-unknown');
+  assert.equal((await request(poll.replace('12345','99999'),terminal)).status,409);
+ });
+ await t.test('transaction failure cannot acknowledge or expose a command',async()=>{
+  execFileSync(python,['-c',`import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute("CREATE TRIGGER test_receipt_failure BEFORE INSERT ON receipts BEGIN SELECT RAISE(ABORT, 'test failure'); END"); c.commit()`,path.join(directory,'bridge.db')]);
+  try{assert.equal((await send('failed-commit')).status,503);}finally{execFileSync(python,['-c','import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute("DROP TRIGGER test_receipt_failure"); c.commit()',path.join(directory,'bridge.db')]);}
+  assert.ok(!(await snapshot()).signals.some(s=>s.id==='failed-commit'));assert.equal(inspect("SELECT count(*) FROM commands WHERE id='failed-commit'")[0][0],0);assert.equal((await request(poll,terminal)).status,204);
+ });
+ await t.test('deduplication persists beyond the recent dashboard window',async()=>{
+  for(let i=0;i<205;i++){const began=performance.now();const response=await send('history-'+i,{sentAt:'2000-01-01T00:00:00Z'});assert.equal(response.status,202);await response.json();ingressMs.push(performance.now()-began);}
+  assert.ok(Math.max(...ingressMs)<3000,'durable acknowledgement must finish within TradingView timeout on the tested workload');
+  assert.equal((await snapshot()).signals.length,200);assert.equal((await send('offline-first')).status,200);assert.equal((await send('offline-first',{lots:0.02})).status,409);
+  await stop();await start();assert.equal((await send('offline-first')).status,200);assert.equal((await request(poll,terminal)).status,204);
+ });
+ await t.test('consistent backup and restore preserve history without replaying queued orders',async()=>{
+  await send('restore-dispatched');assert.equal((await request(poll,terminal)).status,200);await configure({paused:true});await send('restore-pending');
+  const r=await request('/api/admin/backup',admin,{});assert.equal(r.status,200);const result=await r.json();assert.equal(result.integrity,'ok');
+  const restored=await mkdtemp(path.join(root,'restored-'));
+  execFileSync(python,['scripts/db-maintenance.py','restore',path.join(directory,'backups',result.file),restored]);
+  await stop();directory=restored;await start();const state=await snapshot();assert.equal(state.policy.paused,true);assert.equal(state.connection.account,'12345');assert.equal(state.signals.find(s=>s.id==='restore-pending').status,'expired');
+  assert.equal(state.signals.find(s=>s.id==='restore-dispatched').status,'unknown');await configure();assert.equal((await request(poll,terminal)).status,204);assert.equal((await send('offline-first')).status,200);
+  const receipts=await (await request('/api/admin/receipts',admin)).json();assert.ok(receipts.receipts.length>0);
+  await stop();directory=original;await start();
+ });
+ await t.test('SignalR portal handshake and receipt notifications remain available',async()=>{
+  const r=await fetch(base+'/hub/portal/negotiate?negotiateVersion=1',{method:'POST',headers:{Authorization:'Bearer '+admin}});assert.equal(r.status,200);const n=await r.json();
+  const ws=new WebSocket(base.replace('http:','ws:')+'/hub/portal?id='+encodeURIComponent(n.connectionToken)+'&access_token='+admin);t.after(()=>ws.close());await once(ws,'open');const messages=[];ws.addEventListener('message',e=>messages.push(e.data));ws.send(JSON.stringify({protocol:'json',version:1})+'\x1e');
+  for(let i=0;i<40&&!messages.some(m=>String(m).includes('{}'));i++)await new Promise(r=>setTimeout(r,50));assert.ok(messages.some(m=>String(m).includes('{}')));
+  await send('notify',{sentAt:'2000-01-01T00:00:00Z'});for(let i=0;i<50&&!messages.some(m=>String(m).includes('changed'));i++)await new Promise(r=>setTimeout(r,50));assert.ok(messages.some(m=>String(m).includes('changed')));ws.close();
+ });
+ ingressMs.sort((a,b)=>a-b);
+ await writeFile(path.join(root,'validation-metrics.json'),JSON.stringify({scope:'synthetic loopback SQLite and protocol only; no broker',databaseIntegrity:inspect('PRAGMA integrity_check')[0][0],receiptCount:inspect('SELECT count(*) FROM receipts')[0][0],commandCount:inspect('SELECT count(*) FROM commands')[0][0],ingress:{requests:ingressMs.length,concurrency:1,p95Ms:ingressMs[Math.floor(ingressMs.length*0.95)],maxMs:Math.max(...ingressMs)}}));
 });
 
 `````
@@ -950,7 +1586,7 @@ test('HTTP, SignalR, durable command lifecycle and restart recovery (no broker)'
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /source
 COPY . .
-RUN dotnet restore --configfile NuGet.Config && dotnet publish --no-restore -c Release -o /out
+RUN dotnet restore --configfile NuGet.Config --locked-mode && dotnet publish --no-restore -c Release -o /out
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /out .
@@ -972,6 +1608,10 @@ bin
 obj
 mt5/*.ex5
 mt5/*.log
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.sqlite
 
 `````
 
@@ -988,6 +1628,10 @@ obj/
 artifacts/
 mt5/*.ex5
 mt5/*.log
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
 
 `````
 
@@ -1021,7 +1665,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: dotnet restore --configfile NuGet.Config
+      - run: dotnet restore --configfile NuGet.Config --locked-mode
       - run: dotnet build --no-restore --configuration Release --warnaserror
       - run: node --check wwwroot/app.js
       - run: mkdir -p artifacts
@@ -1047,6 +1691,7 @@ jobs:
           path: |
             artifacts/publish/
             mt5/RelayDemo.mq5
+            mt5/RelayDemoRemote.mq5
             README.md
             docs/
 

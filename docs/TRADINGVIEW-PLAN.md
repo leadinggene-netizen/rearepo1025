@@ -1,0 +1,13 @@
+# Durable TradingView delivery
+
+Accepted scope: preserve the working deployment baseline in GitHub; add a server database, receipt history, a transactional command queue, quick acknowledgement, duplicate handling, expiry, pause/risk controls, visible failures, and verified database backup/restore before unattended demo use.
+
+Baseline: tag `relay-vps-demo-v0.1.0`, commit `58d1c09`. The user's moved original local EA is excluded from new commits. Keep MT5's existing wire protocol and demo-only checks. Build and verify against isolated local state first; migration must preserve VPS credentials, account binding and history. The running VPS is not used for synthetic orders.
+
+Implementation: Microsoft.Data.Sqlite, WAL and FULL synchronization, one database transaction per receipt/command mutation. Retain a bounded in-memory recent/pending view, with durable uniqueness checks for older event IDs. Do not persist webhook credentials in receipts. Acknowledge only committed receipt/command state; SignalR notifications must not delay webhook responses. Authenticated invalid/conflicting/policy-blocked receipts remain visible without creating executable commands.
+
+Execution policy: FIFO among queued commands; at most one dispatched command; unknown outcomes block all further dispatch. Commands have an expiry fixed at receipt, capped by optional producer timestamp. An offline/paused terminal never extends expiry. Pending queue is bounded; full-queue receipts are recorded as rejected. A dispatch rechecks current symbol/lot policy. The first database migration starts paused, with no allowed symbols, until the operator configures it.
+
+Controls: pause/resume, exact-symbol allowlist, maximum lots and maximum command age. Warnings and receipt history are in the authenticated portal; no external messaging destination is configured. Backups use SQLite's backup API and integrity checks. Restore into an empty directory, pause execution, expire restored queued commands and mark restored dispatched commands unknown to avoid historical replay.
+
+Verification: real HTTP/SignalR with temporary databases; authenticated receipt persistence/redaction; dedupe across restart and beyond recent history; offline FIFO; stale expiry; pause and changed-policy checks; uncertain results; failed transaction rollback; legacy migration; backup/restore; no broker requests in automated tests. Compile compatibility is unchanged in this increment. Deployment must back up legacy VPS state, run an integrity/migration preflight, and keep the new execution policy paused for the operator's TradingView acceptance test.

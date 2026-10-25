@@ -6,9 +6,9 @@ All paths below are relative to your repository checkout root (the local working
 |---|---|
 | `BridgeDemo.csproj` | Package-free ASP.NET Core project targeting .NET 10 |
 | `global.json` | SDK major version and feature-band roll-forward policy |
-| `NuGet.Config` | Empty package source list for offline server restore |
+| `NuGet.Config` | Project-local official NuGet source; SQLite dependencies are pinned by packages.lock.json |
 | `Models.cs` | Connection, signal, persisted-state and HTTP request models |
-| `StateStore.cs` | Exclusive state-directory lease, synchronized reads, copy-on-write flushed JSON persistence |
+| `StateStore.cs` | SQLite transactions, bounded recent/pending cache, migration, receipt/audit storage, backup and exclusive directory lease |
 | `Program.cs` | Loopback/auth middleware, webhook validation, command lifecycle, terminal polling/results, SignalR hub and operator acknowledgement |
 | `wwwroot/index.html` | Original portal markup: login, metrics, connection setup, trade form, journal and webhook reference |
 | `wwwroot/style.css` | Original responsive dark design for desktop and mobile |
