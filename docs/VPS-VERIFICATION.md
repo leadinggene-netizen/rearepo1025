@@ -2,16 +2,20 @@
 
 ## Current SQLite release
 
+### Operator acceptance — 2026-10-25
+
+The user confirmed that a TradingView alert resulted in successful trade execution on the MT5 demo account through the deployed Relay bridge. This completes the manual TradingView-originated execution acceptance step for this release. Evidence is the user's test report; no specific alert ID, broker ticket, symbol, execution latency or additional failure scenarios were independently inspected in this update. No agent-submitted trade was involved.
+
 Active release: `20261025-sqlite-01`, built from commit `cafd0ffc3d9e8aad5887b07605b27064c6a2864c`. Archive SHA-256: `1dc0eb0b0b62f063dca7f26e17a8f92cac4b9ab23b517b4d5265e36bc4a3bd36`.
 
 - GitHub Linux CI passed: [Build and verify](https://github.com/leadinggene-netizen/rearepo1025/actions/runs/40245662537). The isolated Windows suite passed 11 reported tests with no broker connection. 205 sequential durable ingress requests measured p95 approximately 21 ms and maximum 28 ms; this is a local synthetic workload, not a production capacity guarantee.
 - The installer stopped the service briefly, retained `/var/backups/relay/pre-20261025-sqlite-01/state`, and passed migration/integrity checks on a separate copy before migrating active state.
 - Active database integrity check returned `ok`. The two existing completed commands and credential/account binding preservation fingerprints match before/after. No queued, dispatched or unknown commands were present during migration.
-- The existing remote EA reconnected and the HTTPS dashboard reported Online. Execution remains PAUSED with an empty symbol allowlist for deliberate operator configuration. No EA reload was required and no order was submitted by deployment checks.
+- The existing remote EA reconnected and the HTTPS dashboard reported Online. Deployment initialized execution PAUSED with an empty symbol allowlist for deliberate operator configuration. No EA reload was required and no order was submitted by deployment checks. Subsequent operator acceptance is recorded above; this document does not assert the current pause setting.
 - HTTPS health, authenticated dashboard/receipt reads, credential-role rejection, unexpected-origin rejection, body-size rejection and authenticated SignalR WebSocket handshake passed after migration.
 - `relay-backup.timer` is enabled. Both the authenticated backup API and scheduled backup service passed. Database file mode is 0600, owner relay; backup directory is 0700.
 - A 40960-byte database backup was transferred into memory, checksum-checked, encrypted to a 41572-byte AES-GCM CMS file on the Windows computer, and fully decrypted/authenticated back to identical bytes. It is under `.tools/vps-backups/relay-database/` with a verification manifest, using the existing separately protected recovery key. No plaintext database copy was saved locally and nothing was uploaded to Google Drive. This database verification does not verify the older full-disk image.
-- SSH, Nginx and NoMachine remain active. x-ui remains disabled. TradingView-originated end-to-end execution is an operator acceptance step; [TRADINGVIEW.md](TRADINGVIEW.md) describes an initial paused receipt test followed by a deliberate demo trade.
+- SSH, Nginx and NoMachine were verified active after deployment, and x-ui disabled. TradingView-originated execution was subsequently confirmed by the user as recorded above. [TRADINGVIEW.md](TRADINGVIEW.md) retains the setup and acceptance procedure for future configurations.
 
 ## Earlier HTTPS deployment baseline
 
